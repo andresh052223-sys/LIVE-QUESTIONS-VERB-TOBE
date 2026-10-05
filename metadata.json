@@ -1,0 +1,6 @@
+{
+  "name": "TO BE LIVE CHALLENGE",
+  "description": "Plataforma educativa interactiva en vivo para aprender y practicar el verbo TO BE, preguntas Yes/No y WH con sincronización en tiempo real y tabla de clasificación.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
