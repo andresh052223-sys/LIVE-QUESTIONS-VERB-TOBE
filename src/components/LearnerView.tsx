@@ -272,9 +272,9 @@ export const LearnerView: React.FC<LearnerViewProps> = ({
       {/* Main Game Stage */}
       <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 flex flex-col justify-center">
         {/* ============================================================== */}
-        {/* STATE 1: LOBBY */}
+        {/* STATE 1: LOBBY / WAITING ROOM */}
         {/* ============================================================== */}
-        {sessionState.status === 'lobby' && (
+        {(sessionState.status === 'lobby' || sessionState.status === 'WAITING') && (
           <div className="text-center py-10 space-y-6">
             <div className="w-20 h-20 mx-auto rounded-full bg-indigo-500/10 border-2 border-indigo-500/30 flex items-center justify-center relative">
               <Sparkles className="w-10 h-10 text-indigo-400 animate-bounce" />
@@ -311,7 +311,7 @@ export const LearnerView: React.FC<LearnerViewProps> = ({
         {/* ============================================================== */}
         {/* STATE 2: QUESTION ACTIVE */}
         {/* ============================================================== */}
-        {sessionState.status === 'question_active' && sessionState.currentQuestion && (
+        {(sessionState.status === 'question_active' || sessionState.status === 'PLAYING') && sessionState.currentQuestion && (
           <div className="space-y-6 animate-fadeIn">
             {/* Question Header & Countdown */}
             <div className="flex items-center justify-between gap-4">
@@ -402,7 +402,7 @@ export const LearnerView: React.FC<LearnerViewProps> = ({
         {/* ============================================================== */}
         {/* STATE 3: QUESTION ENDED (REVEAL ANSWER & FEEDBACK) */}
         {/* ============================================================== */}
-        {sessionState.status === 'question_ended' && sessionState.currentQuestion && (
+        {(sessionState.status === 'question_ended' || sessionState.status === 'REVEALED') && sessionState.currentQuestion && (
           <div className="space-y-6 animate-fadeIn">
             {/* Feedback Banner */}
             {personalInfo && (
@@ -472,7 +472,7 @@ export const LearnerView: React.FC<LearnerViewProps> = ({
         {/* ============================================================== */}
         {/* STATE 4: INTERMEDIATE LEADERBOARD */}
         {/* ============================================================== */}
-        {sessionState.status === 'leaderboard' && (
+        {(sessionState.status === 'leaderboard' || sessionState.status === 'LEADERBOARD') && (
           <div className="space-y-6 animate-fadeIn">
             <div className="text-center">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold uppercase tracking-wider mb-2">
@@ -550,7 +550,7 @@ export const LearnerView: React.FC<LearnerViewProps> = ({
         {/* ============================================================== */}
         {/* STATE 5: FINISHED GAME */}
         {/* ============================================================== */}
-        {sessionState.status === 'finished' && (
+        {(sessionState.status === 'finished' || sessionState.status === 'FINISHED') && (
           <div className="text-center py-6 space-y-6 animate-fadeIn">
             <div className="space-y-2">
               <span className="text-4xl">🏆</span>

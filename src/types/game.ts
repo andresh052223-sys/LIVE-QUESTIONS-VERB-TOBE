@@ -13,10 +13,15 @@ export interface Question {
 
 export type SessionStatus = 
   | 'lobby' 
+  | 'WAITING'
   | 'question_active' 
+  | 'PLAYING'
   | 'question_ended' 
+  | 'REVEALED'
   | 'leaderboard' 
-  | 'finished';
+  | 'LEADERBOARD'
+  | 'finished'
+  | 'FINISHED';
 
 export interface ParticipantAnswer {
   questionId: string;

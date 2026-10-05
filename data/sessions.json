@@ -1,0 +1,213 @@
+{
+  "304649": {
+    "sessionId": "session_1791227861856_fi9fe",
+    "gamePin": "304649",
+    "pin": "304649",
+    "instructorId": "instructor_1791227861856",
+    "status": "PLAYING",
+    "questionCount": 10,
+    "category": "all",
+    "timePerQuestion": 20,
+    "selectionMode": "random",
+    "settings": {
+      "timerSeconds": 20,
+      "totalQuestions": 10,
+      "categoryFilter": "all",
+      "questionMode": "random"
+    },
+    "questions": [
+      {
+        "id": "wh-08",
+        "category": "wh_questions",
+        "categoryLabel": "WH Questions",
+        "question": "When ___ the final English presentation?",
+        "options": [
+          "are",
+          "is",
+          "am",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "\"The presentation\" es un evento singular: \"When is the presentation?\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-15",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "My parents ___ from Medellin, Colombia.",
+        "options": [
+          "is",
+          "are",
+          "am",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "\"My parents\" equivale a \"They\", por lo que corresponde \"are\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "yn-05",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "___ the meeting at 10:00 AM?",
+        "options": [
+          "Are",
+          "Is",
+          "Am",
+          "Do"
+        ],
+        "correctIndex": 1,
+        "explanation": "\"The meeting\" es singular (it), por tanto la pregunta inicia con \"Is\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-13",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "The students ___ tired after the long exam.",
+        "options": [
+          "isn't",
+          "aren't",
+          "are",
+          "am"
+        ],
+        "correctIndex": 2,
+        "explanation": "\"The students\" es plural, la forma afirmativa adecuada es \"are\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "yn-15",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "Is this your first English course?",
+        "options": [
+          "Yes, it is.",
+          "Yes, this is.",
+          "Yes, I are.",
+          "No, it not is."
+        ],
+        "correctIndex": 0,
+        "explanation": "Para preguntas sobre cosas singulares (\"this course\"), el pronombre en respuesta es \"it\": \"Yes, it is.\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "yn-04",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "Are they ready for the presentation?",
+        "options": [
+          "No, they isn't.",
+          "No, they aren't.",
+          "No, they not are.",
+          "Yes, they is."
+        ],
+        "correctIndex": 1,
+        "explanation": "La respuesta corta negativa para \"they\" es \"No, they aren't.\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-04",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "Carlos and Maria ___ excellent engineers.",
+        "options": [
+          "is",
+          "am",
+          "are",
+          "be"
+        ],
+        "correctIndex": 2,
+        "explanation": "Carlos y María forman un sujeto plural (They), por lo tanto corresponde \"are\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-06",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "We ___ ready for the English challenge!",
+        "options": [
+          "am",
+          "is",
+          "are",
+          "be"
+        ],
+        "correctIndex": 2,
+        "explanation": "\"We\" es la primera persona del plural y se conjuga con \"are\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "wh-11",
+        "category": "wh_questions",
+        "categoryLabel": "WH Questions",
+        "question": "___ is the library? - It is on the second floor.",
+        "options": [
+          "Where",
+          "Who",
+          "What",
+          "Why"
+        ],
+        "correctIndex": 0,
+        "explanation": "Usamos \"Where\" para preguntar por un lugar o ubicación.",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-16",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "David ___ twenty years old.",
+        "options": [
+          "have",
+          "has",
+          "is",
+          "are"
+        ],
+        "correctIndex": 2,
+        "explanation": "¡En inglés la edad se expresa con el verbo TO BE, no con \"have\"!",
+        "difficulty": "medium"
+      }
+    ],
+    "currentQuestionIndex": 1,
+    "participants": [
+      {
+        "id": "part_izoqdrv",
+        "name": "Test Learner",
+        "ficha": "2718290",
+        "score": 1000,
+        "lastPointsEarned": 0,
+        "streak": 1,
+        "isOnline": true,
+        "hasAnswered": false,
+        "selectedOption": null,
+        "answeredAt": 1791227861891,
+        "answers": [
+          {
+            "questionId": "wh-08",
+            "selectedIndex": 1,
+            "isCorrect": true,
+            "points": 1000,
+            "timeSpentSeconds": 0
+          }
+        ]
+      }
+    ],
+    "leaderboard": [
+      {
+        "id": "part_izoqdrv",
+        "name": "Test Learner",
+        "ficha": "2718290",
+        "score": 1000,
+        "streak": 1,
+        "lastPoints": 1000,
+        "isOnline": true,
+        "rank": 1
+      }
+    ],
+    "timeRemaining": 20,
+    "isPaused": false,
+    "finalSummary": null,
+    "createdAt": "2026-10-05T19:17:41.856Z",
+    "updatedAt": "2026-10-05T19:17:41.895Z",
+    "questionStartedAt": 1791227861895
+  }
+}

@@ -24,20 +24,23 @@ import {
   VolumeX, 
   LogOut, 
   Sparkles, 
-  Bot,
-  HelpCircle,
-  BarChart3,
-  Award
+  Bot, 
+  HelpCircle, 
+  BarChart3, 
+  Award,
+  AlertCircle 
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { sounds } from '../utils/sound';
 import { downloadResultsCsv } from '../utils/exportCsv';
+import { QUESTIONS_BANK } from '../data/questions';
 
 interface InstructorDashboardProps {
   sessionState: PublicSessionState | null;
   detailedParticipants: Participant[];
   finalSummary: FinalGameSummary | null;
-  onCreateSession: (settings: GameSettings) => Promise<void> | void;
+  errorMessage?: string | null;
+  onCreateSession: (settings: GameSettings) => Promise<any> | void;
   onAddDemoLearners: () => Promise<void> | void;
   onStartGame: () => Promise<void> | void;
   onPauseResume: () => Promise<void> | void;
@@ -59,6 +62,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   sessionState,
   detailedParticipants,
   finalSummary,
+  errorMessage,
   onCreateSession,
   onAddDemoLearners,
   onStartGame,
@@ -78,6 +82,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   const [isMuted, setIsMuted] = useState(sounds.getMuted());
   const [activeTab, setActiveTab] = useState<'live' | 'participants'>('live');
   const [isCreating, setIsCreating] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   // Trigger confetti when game finishes
   useEffect(() => {
@@ -109,6 +114,24 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLocalError(null);
+
+    // Validate available questions
+    let availableCount = QUESTIONS_BANK.length;
+    if (categoryFilter !== 'all') {
+      availableCount = QUESTIONS_BANK.filter(q => q.category === categoryFilter).length;
+    }
+
+    if (availableCount === 0) {
+      setLocalError('No questions available in this category.');
+      return;
+    }
+
+    if (totalQuestions > availableCount) {
+      setLocalError(`Not enough questions available in this category. (Requested ${totalQuestions}, available ${availableCount})`);
+      return;
+    }
+
     setIsCreating(true);
     try {
       await onCreateSession({
@@ -117,6 +140,9 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         categoryFilter,
         questionMode
       });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al crear la sesión';
+      setLocalError(msg);
     } finally {
       setIsCreating(false);
     }
@@ -247,6 +273,13 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                 </div>
               </div>
 
+              {(localError || errorMessage) && (
+                <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>{localError || errorMessage}</span>
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={isCreating}
@@ -336,9 +369,9 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
       {/* Main Body */}
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 space-y-6">
         {/* ============================================================== */}
-        {/* VIEW 1: LOBBY */}
+        {/* VIEW 1: LOBBY / WAITING ROOM */}
         {/* ============================================================== */}
-        {sessionState.status === 'lobby' && (
+        {(sessionState.status === 'lobby' || sessionState.status === 'WAITING') && (
           <div className="space-y-8 animate-fadeIn">
             {/* Big PIN Presentation Card */}
             <div className="bg-gradient-to-br from-indigo-950/80 via-slate-900 to-slate-900 border-2 border-indigo-500/40 rounded-3xl p-8 sm:p-12 text-center shadow-2xl relative overflow-hidden">
@@ -346,17 +379,27 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                 <Sparkles className="w-64 h-64 text-indigo-400" />
               </div>
 
-              <span className="text-xs sm:text-sm font-extrabold uppercase tracking-widest text-indigo-400 bg-indigo-500/10 px-4 py-1.5 rounded-full border border-indigo-500/20">
-                Pide a los aprendices ingresar a la aplicación con el código SENA2026
-              </span>
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-extrabold uppercase tracking-widest mb-3">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                LIVE SESSION
+              </div>
 
               <div className="my-6">
                 <span className="text-xs text-slate-400 uppercase tracking-widest block font-bold mb-1">
-                  GAME PIN DE LA SALA
+                  GAME PIN
                 </span>
                 <div className="text-6xl sm:text-8xl font-black font-mono text-white tracking-widest drop-shadow-md">
                   {sessionState.pin}
                 </div>
+              </div>
+
+              <div className="space-y-1 mb-6">
+                <p className="text-lg text-slate-300 font-medium animate-pulse">
+                  Waiting for learners...
+                </p>
+                <p className="text-sm font-bold text-emerald-400">
+                  Participants: {sessionState.participantsCount}
+                </p>
               </div>
 
               <div className="flex flex-wrap items-center justify-center gap-3">
@@ -384,7 +427,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                 <div className="flex items-center gap-2">
                   <Users className="w-5 h-5 text-emerald-400" />
                   <h3 className="font-bold text-white text-lg">
-                    Aprendices Conectados ({sessionState.participantsCount})
+                    LIVE PARTICIPANTS ({sessionState.participantsCount})
                   </h3>
                 </div>
 
@@ -404,8 +447,8 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
               {sessionState.participantsCount === 0 ? (
                 <div className="text-center py-12 text-slate-400 text-sm">
-                  <p className="animate-pulse">Esperando a que los aprendices ingresen con el PIN...</p>
-                  <p className="text-xs text-slate-400 mt-2">
+                  <p className="animate-pulse">Waiting for learners to join with Game PIN {sessionState.pin}...</p>
+                  <p className="text-xs text-slate-500 mt-2">
                     Tip: Puedes presionar el botón <strong>"DEMO MODE"</strong> para simular 10 jugadores automáticamente.
                   </p>
                 </div>
@@ -432,7 +475,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         {/* ============================================================== */}
         {/* VIEW 2: QUESTION ACTIVE */}
         {/* ============================================================== */}
-        {sessionState.status === 'question_active' && sessionState.currentQuestion && (
+        {(sessionState.status === 'question_active' || sessionState.status === 'PLAYING') && sessionState.currentQuestion && (
           <div className="space-y-6 animate-fadeIn">
             {/* Control Bar */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
@@ -563,7 +606,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         {/* ============================================================== */}
         {/* VIEW 3: QUESTION ENDED (REVEAL ANSWER & STATS) */}
         {/* ============================================================== */}
-        {sessionState.status === 'question_ended' && sessionState.currentQuestion && (
+        {(sessionState.status === 'question_ended' || sessionState.status === 'REVEALED') && sessionState.currentQuestion && (
           <div className="space-y-6 animate-fadeIn">
             {/* Control Bar */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
@@ -685,7 +728,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         {/* ============================================================== */}
         {/* VIEW 4: INTERMEDIATE LEADERBOARD */}
         {/* ============================================================== */}
-        {sessionState.status === 'leaderboard' && (
+        {(sessionState.status === 'leaderboard' || sessionState.status === 'LEADERBOARD') && (
           <div className="space-y-6 animate-fadeIn">
             <div className="flex items-center justify-between">
               <div>
@@ -794,7 +837,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         {/* ============================================================== */}
         {/* VIEW 5: FINISHED GAME REPORT & RESULTS */}
         {/* ============================================================== */}
-        {sessionState.status === 'finished' && finalSummary && (
+        {(sessionState.status === 'finished' || sessionState.status === 'FINISHED') && finalSummary && (
           <div className="space-y-8 animate-fadeIn">
             {/* Header with Download & Restart */}
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 flex flex-wrap items-center justify-between gap-6 shadow-2xl">

@@ -23,7 +23,7 @@ interface UseGameSocketReturn {
   } | null;
   finalSummary: FinalGameSummary | null;
   errorMessage: string | null;
-  createSession: (settings: GameSettings) => Promise<void>;
+  createSession: (settings: GameSettings) => Promise<PublicSessionState>;
   reconnectInstructor: (pin: string) => Promise<void>;
   joinSession: (pin: string, name: string, ficha?: string, participantId?: string) => Promise<void>;
   addDemoLearners: () => Promise<void>;
@@ -49,14 +49,14 @@ export function useGameSocket(): UseGameSocketReturn {
   const lastStateStatusRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Helper to apply incoming session state and handle audio cues
+  // Apply incoming session state update
   const applyStateUpdate = useCallback((
     newState: PublicSessionState, 
     detailedParts?: Participant[], 
     personal?: UseGameSocketReturn['personalInfo'],
     summary?: FinalGameSummary | null
   ) => {
-    // Audio cue transitions
+    // Audio triggers
     if (lastStateStatusRef.current !== newState.status) {
       if (newState.status === 'question_active') {
         sounds.playTick();
@@ -74,7 +74,7 @@ export function useGameSocket(): UseGameSocketReturn {
       lastStateStatusRef.current = newState.status;
     }
 
-    // Countdown tick for last 3 seconds
+    // Tick on last 3s
     if (newState.status === 'question_active' && newState.timeRemaining <= 3 && newState.timeRemaining > 0) {
       sounds.playTick();
     }
@@ -94,7 +94,7 @@ export function useGameSocket(): UseGameSocketReturn {
     }
   }, []);
 
-  // Set up real-time stream (SSE) whenever a PIN is active
+  // Real-time synchronization (SSE stream + fallback polling)
   useEffect(() => {
     const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
     if (!pin) {
@@ -112,7 +112,7 @@ export function useGameSocket(): UseGameSocketReturn {
     const role = localStorage.getItem('to_be_role') || 'learner';
     const participantId = personalInfo?.id || localStorage.getItem('to_be_participant_id') || '';
 
-    // 1. Establish SSE Connection
+    // Connect SSE
     const sseUrl = `/api/session/${pin}/events?role=${role}&participantId=${encodeURIComponent(participantId)}`;
     const es = new EventSource(sseUrl);
 
@@ -133,13 +133,12 @@ export function useGameSocket(): UseGameSocketReturn {
     };
 
     es.onerror = () => {
-      // SSE connection temporarily lost, fallback polling will ensure sync
       setIsConnected(false);
     };
 
     eventSourceRef.current = es;
 
-    // 2. Fallback polling every 1200ms
+    // Polling every 1200ms
     const poll = async () => {
       try {
         const res = await fetch(`/api/session/${pin}?participantId=${encodeURIComponent(participantId)}`);
@@ -149,7 +148,7 @@ export function useGameSocket(): UseGameSocketReturn {
           applyStateUpdate(data.state, data.detailedParticipants, data.personal, data.summary);
         }
       } catch {
-        // Polling network issue
+        // Network polling error
       }
     };
 
@@ -164,7 +163,7 @@ export function useGameSocket(): UseGameSocketReturn {
     };
   }, [sessionState?.pin, personalInfo?.id, applyStateUpdate]);
 
-  // Initial load check to restore session if available
+  // Initial load check
   useEffect(() => {
     const savedPin = localStorage.getItem('to_be_active_pin');
     const savedRole = localStorage.getItem('to_be_role');
@@ -195,32 +194,42 @@ export function useGameSocket(): UseGameSocketReturn {
           }
         })
         .catch(() => {
-          // Clean stale session
+          // Stale session
           localStorage.removeItem('to_be_active_pin');
         });
     }
   }, [applyStateUpdate]);
 
-  // Actions with direct, instant HTTP requests
-  const createSession = useCallback(async (settings: GameSettings) => {
+  // 1. CREATE SESSION
+  const createSession = useCallback(async (settings: GameSettings): Promise<PublicSessionState> => {
+    setErrorMessage(null);
     try {
-      setErrorMessage(null);
       const res = await fetch('/api/session/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ settings })
       });
-      if (!res.ok) throw new Error('Error al crear la sesión en el servidor');
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const message = errorData.error || 'Error al crear la sesión en la base de datos';
+        setErrorMessage(message);
+        throw new Error(message);
+      }
+
       const data = await res.json();
-      localStorage.setItem('to_be_active_pin', data.pin);
+      localStorage.setItem('to_be_active_pin', data.gamePin || data.pin);
       setSessionState(data.state);
       setDetailedParticipants(data.detailedParticipants || []);
+      return data.state;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error desconocido al crear sesión';
       setErrorMessage(msg);
+      throw err;
     }
   }, []);
 
+  // 2. RECONNECT INSTRUCTOR
   const reconnectInstructor = useCallback(async (pin: string) => {
     try {
       const res = await fetch(`/api/session/${pin}`);
@@ -234,6 +243,7 @@ export function useGameSocket(): UseGameSocketReturn {
     }
   }, [applyStateUpdate]);
 
+  // 3. JOIN SESSION
   const joinSession = useCallback(async (pin: string, name: string, ficha?: string, participantId?: string) => {
     try {
       setErrorMessage(null);
@@ -242,12 +252,14 @@ export function useGameSocket(): UseGameSocketReturn {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin, name, ficha, participantId })
       });
+
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'PIN no encontrado o sesión inválida');
+        throw new Error(errData.error || 'Game PIN no encontrado o sesión inválida');
       }
+
       const data = await res.json();
-      localStorage.setItem('to_be_active_pin', data.pin);
+      localStorage.setItem('to_be_active_pin', data.gamePin || data.pin);
       if (data.participantId) {
         localStorage.setItem('to_be_participant_id', data.participantId);
       }
@@ -256,9 +268,11 @@ export function useGameSocket(): UseGameSocketReturn {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al unirse a la sala';
       setErrorMessage(msg);
+      throw err;
     }
   }, []);
 
+  // 4. ADD DEMO LEARNERS
   const addDemoLearners = useCallback(async () => {
     const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
     if (!pin) return;
@@ -278,6 +292,7 @@ export function useGameSocket(): UseGameSocketReturn {
     }
   }, [sessionState?.pin]);
 
+  // 5. START GAME
   const startGame = useCallback(async () => {
     const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
     if (!pin) return;
@@ -296,13 +311,13 @@ export function useGameSocket(): UseGameSocketReturn {
     }
   }, [sessionState?.pin]);
 
+  // 6. SUBMIT ANSWER
   const submitAnswer = useCallback(async (selectedIndex: number) => {
     sounds.playSelect();
     const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
     const participantId = personalInfo?.id || localStorage.getItem('to_be_participant_id');
     if (!pin || !participantId) return;
 
-    // Optimistic UI update immediately
     setPersonalInfo(prev => prev ? {
       ...prev,
       hasAnswered: true,
@@ -320,6 +335,7 @@ export function useGameSocket(): UseGameSocketReturn {
     }
   }, [sessionState?.pin, personalInfo?.id]);
 
+  // 7. PAUSE / RESUME
   const pauseResume = useCallback(async () => {
     const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
     if (!pin) return;
@@ -334,6 +350,7 @@ export function useGameSocket(): UseGameSocketReturn {
     }
   }, [sessionState?.pin]);
 
+  // 8. REVEAL ANSWER
   const revealAnswer = useCallback(async () => {
     const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
     if (!pin) return;
@@ -348,6 +365,7 @@ export function useGameSocket(): UseGameSocketReturn {
     }
   }, [sessionState?.pin]);
 
+  // 9. SHOW LEADERBOARD
   const showLeaderboard = useCallback(async () => {
     const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
     if (!pin) return;
@@ -362,6 +380,7 @@ export function useGameSocket(): UseGameSocketReturn {
     }
   }, [sessionState?.pin]);
 
+  // 10. NEXT QUESTION
   const nextQuestion = useCallback(async () => {
     const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
     if (!pin) return;
@@ -376,6 +395,7 @@ export function useGameSocket(): UseGameSocketReturn {
     }
   }, [sessionState?.pin]);
 
+  // 11. END GAME
   const endGame = useCallback(async () => {
     const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
     if (!pin) return;

@@ -73,6 +73,7 @@ export default function App() {
       sessionState={sessionState}
       detailedParticipants={detailedParticipants}
       finalSummary={finalSummary}
+      errorMessage={errorMessage}
       onCreateSession={createSession}
       onAddDemoLearners={addDemoLearners}
       onStartGame={startGame}

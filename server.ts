@@ -3,27 +3,37 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 import { QUESTIONS_BANK, DEMO_LEARNERS } from './src/data/questions';
 import { 
   Question, 
   Participant, 
   GameSettings, 
-  SessionStatus, 
-  PublicSessionState, 
   FinalGameSummary,
   QuestionCategory
 } from './src/types/game';
+import { 
+  loadSessionsFromDisk, 
+  saveSession, 
+  getSession, 
+  toPublicState, 
+  isPinTaken, 
+  StoredGameSession 
+} from './src/db/sessionStore';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, path: '/ws' });
 
 const PORT = 3000;
 
 app.use(express.json());
+
+// Initialize persistent storage from disk
+loadSessionsFromDisk();
 
 interface SseClient {
   id: string;
@@ -32,41 +42,46 @@ interface SseClient {
   res: Response;
 }
 
-interface ServerGameSession {
-  pin: string;
-  instructorWs: WebSocket | null;
-  instructorId: string;
-  status: SessionStatus;
-  settings: GameSettings;
-  questions: Question[];
-  currentQuestionIndex: number;
-  participants: Map<string, Participant>;
-  participantSockets: Map<string, WebSocket>;
-  sseClients: Map<string, SseClient>;
-  timeRemaining: number;
-  timerInterval: NodeJS.Timeout | null;
-  isPaused: boolean;
+interface RuntimeSession {
+  interval: NodeJS.Timeout | null;
   demoTimeouts: NodeJS.Timeout[];
-  finalSummary: FinalGameSummary | null;
+  sseClients: Map<string, SseClient>;
+  wsClients: Map<string, WebSocket>;
+  instructorWs: WebSocket | null;
 }
 
-const activeSessions = new Map<string, ServerGameSession>();
+const runtimeMap = new Map<string, RuntimeSession>();
 
-// Generate unique 6-digit PIN
+function getRuntime(pin: string): RuntimeSession {
+  let rt = runtimeMap.get(pin);
+  if (!rt) {
+    rt = {
+      interval: null,
+      demoTimeouts: [],
+      sseClients: new Map(),
+      wsClients: new Map(),
+      instructorWs: null
+    };
+    runtimeMap.set(pin, rt);
+  }
+  return rt;
+}
+
+// Generate unique 6-digit numeric GAME PIN
 function generateGamePin(): string {
   let pin = '';
   for (let i = 0; i < 6; i++) {
     pin += Math.floor(Math.random() * 10).toString();
   }
-  if (activeSessions.has(pin)) {
+  if (isPinTaken(pin)) {
     return generateGamePin();
   }
   return pin;
 }
 
-// Compute ranked leaderboard
-function calculateLeaderboard(session: ServerGameSession) {
-  const list = Array.from(session.participants.values())
+// Recalculate leaderboard
+function updateSessionLeaderboard(session: StoredGameSession) {
+  const list = session.participants
     .map(p => ({
       id: p.id,
       name: p.name,
@@ -78,77 +93,32 @@ function calculateLeaderboard(session: ServerGameSession) {
     }))
     .sort((a, b) => b.score - a.score);
 
-  return list.map((item, idx) => ({
+  session.leaderboard = list.map((item, idx) => ({
     ...item,
     rank: idx + 1
   }));
 }
 
-// Build public session state for broadcast
-function buildPublicState(session: ServerGameSession): PublicSessionState {
-  const currentQ = session.questions[session.currentQuestionIndex];
-  const participantsArr = Array.from(session.participants.values());
-  const answeredCount = participantsArr.filter(p => p.hasAnswered).length;
-  
-  // Calculate distribution
-  const distribution: [number, number, number, number] = [0, 0, 0, 0];
-  if (session.status === 'question_ended' || session.status === 'leaderboard' || session.status === 'finished') {
-    participantsArr.forEach(p => {
-      if (p.selectedOption !== null && p.selectedOption >= 0 && p.selectedOption <= 3) {
-        distribution[p.selectedOption]++;
-      }
-    });
-  }
+// Broadcast session state to all clients (WebSocket and SSE)
+function broadcastSession(session: StoredGameSession) {
+  const publicState = toPublicState(session);
+  const rt = getRuntime(session.gamePin);
 
-  let sanitizedQuestion: PublicSessionState['currentQuestion'] = undefined;
-  if (currentQ) {
-    const showAnswers = session.status === 'question_ended' || session.status === 'leaderboard' || session.status === 'finished';
-    sanitizedQuestion = {
-      id: currentQ.id,
-      category: currentQ.category,
-      categoryLabel: currentQ.categoryLabel,
-      question: currentQ.question,
-      options: currentQ.options,
-      correctIndex: showAnswers ? currentQ.correctIndex : undefined,
-      explanation: showAnswers ? currentQ.explanation : undefined,
-      difficulty: currentQ.difficulty
-    };
-  }
-
-  return {
-    pin: session.pin,
-    status: session.status,
-    currentQuestionIndex: session.currentQuestionIndex,
-    totalQuestions: session.questions.length,
-    currentQuestion: sanitizedQuestion,
-    timeRemaining: session.timeRemaining,
-    totalTimerSeconds: session.settings.timerSeconds,
-    isPaused: session.isPaused,
-    participantsCount: session.participants.size,
-    answeredCount,
-    answerDistribution: distribution,
-    leaderboard: calculateLeaderboard(session)
-  };
-}
-
-// Broadcast to WebSocket and SSE clients
-function broadcastSessionState(session: ServerGameSession) {
-  const publicState = buildPublicState(session);
   const instructorPayloadStr = JSON.stringify({
     action: 'SESSION_STATE_UPDATE',
     state: publicState,
-    detailedParticipants: Array.from(session.participants.values()),
+    detailedParticipants: session.participants,
     summary: session.finalSummary
   });
 
   // 1. WebSocket to Instructor
-  if (session.instructorWs && session.instructorWs.readyState === WebSocket.OPEN) {
-    session.instructorWs.send(instructorPayloadStr);
+  if (rt.instructorWs && rt.instructorWs.readyState === WebSocket.OPEN) {
+    rt.instructorWs.send(instructorPayloadStr);
   }
 
-  // 2. WebSocket to Participants
-  session.participants.forEach((p, pId) => {
-    const ws = session.participantSockets.get(pId);
+  // 2. WebSocket to Connected Learners
+  session.participants.forEach(p => {
+    const ws = rt.wsClients.get(p.id);
     if (ws && ws.readyState === WebSocket.OPEN) {
       const personalRank = publicState.leaderboard.find(item => item.id === p.id)?.rank || 1;
       ws.send(JSON.stringify({
@@ -169,14 +139,13 @@ function broadcastSessionState(session: ServerGameSession) {
     }
   });
 
-  // 3. SSE Clients
-  session.sseClients.forEach((client, clientId) => {
+  // 3. SSE Clients fallback
+  rt.sseClients.forEach((client, clientId) => {
     try {
       if (client.role === 'instructor') {
         client.res.write(`data: ${instructorPayloadStr}\n\n`);
       } else {
-        const pId = client.participantId;
-        const p = pId ? session.participants.get(pId) : null;
+        const p = client.participantId ? session.participants.find(part => part.id === client.participantId) : null;
         const personalRank = p ? (publicState.leaderboard.find(item => item.id === p.id)?.rank || 1) : 1;
         const learnerPayload = JSON.stringify({
           action: 'SESSION_STATE_UPDATE',
@@ -196,29 +165,28 @@ function broadcastSessionState(session: ServerGameSession) {
         client.res.write(`data: ${learnerPayload}\n\n`);
       }
     } catch {
-      session.sseClients.delete(clientId);
+      rt.sseClients.delete(clientId);
     }
   });
 }
 
-function clearSessionTimers(session: ServerGameSession) {
-  if (session.timerInterval) {
-    clearInterval(session.timerInterval);
-    session.timerInterval = null;
+function clearSessionTimers(pin: string) {
+  const rt = getRuntime(pin);
+  if (rt.interval) {
+    clearInterval(rt.interval);
+    rt.interval = null;
   }
-  session.demoTimeouts.forEach(t => clearTimeout(t));
-  session.demoTimeouts = [];
+  rt.demoTimeouts.forEach(t => clearTimeout(t));
+  rt.demoTimeouts = [];
 }
 
-// End the current question and reveal answers
-function handleQuestionEnd(session: ServerGameSession) {
-  clearSessionTimers(session);
-  session.status = 'question_ended';
+function handleQuestionEnd(session: StoredGameSession) {
+  clearSessionTimers(session.gamePin);
+  session.status = 'REVEALED';
   session.timeRemaining = 0;
 
   const currentQ = session.questions[session.currentQuestionIndex];
   if (currentQ) {
-    // Check any unanswered active participants
     session.participants.forEach(p => {
       if (!p.hasAnswered) {
         p.hasAnswered = true;
@@ -230,38 +198,43 @@ function handleQuestionEnd(session: ServerGameSession) {
           selectedIndex: -1,
           isCorrect: false,
           points: 0,
-          timeSpentSeconds: session.settings.timerSeconds
+          timeSpentSeconds: session.timePerQuestion
         });
       }
     });
   }
 
-  broadcastSessionState(session);
+  updateSessionLeaderboard(session);
+  saveSession(session);
+  broadcastSession(session);
 }
 
-// Start timer for question
-function startQuestionTimer(session: ServerGameSession) {
-  clearSessionTimers(session);
-  session.status = 'question_active';
-  session.timeRemaining = session.settings.timerSeconds;
+function startQuestionTimer(session: StoredGameSession) {
+  clearSessionTimers(session.gamePin);
+  session.status = 'PLAYING';
+  session.timeRemaining = session.timePerQuestion;
+  session.questionStartedAt = Date.now();
   session.isPaused = false;
 
-  // Reset participant response state for this question
+  // Reset answer states
   session.participants.forEach(p => {
     p.hasAnswered = false;
     p.selectedOption = null;
     p.lastPointsEarned = 0;
   });
 
+  const rt = getRuntime(session.gamePin);
   const currentQ = session.questions[session.currentQuestionIndex];
 
-  // Schedule simulated demo learners
-  session.participants.forEach((p) => {
+  // Schedule demo learners responses
+  session.participants.forEach(p => {
     if (p.isSimulated && currentQ) {
-      const maxDelay = Math.max(2, session.settings.timerSeconds - 2);
-      const delaySeconds = 1.2 + Math.random() * (maxDelay - 1.2);
-      const timeout = setTimeout(() => {
-        if (session.status !== 'question_active' || p.hasAnswered) return;
+      const maxDelay = Math.max(2, session.timePerQuestion - 2);
+      const delay = 1.2 + Math.random() * (maxDelay - 1.2);
+      const t = setTimeout(() => {
+        const liveSession = getSession(session.gamePin);
+        if (!liveSession || liveSession.status !== 'PLAYING' || p.hasAnswered) return;
+
         const willBeCorrect = Math.random() < 0.82;
         let chosenOption = currentQ.correctIndex;
         if (!willBeCorrect) {
@@ -269,9 +242,10 @@ function startQuestionTimer(session: ServerGameSession) {
           chosenOption = wrongOptions[Math.floor(Math.random() * wrongOptions.length)];
         }
 
-        const remaining = Math.max(1, session.timeRemaining);
+        const elapsedSec = (Date.now() - liveSession.questionStartedAt) / 1000;
+        const remaining = Math.max(0, liveSession.timePerQuestion - elapsedSec);
         const points = chosenOption === currentQ.correctIndex
-          ? Math.round(500 + 500 * (remaining / session.settings.timerSeconds))
+          ? Math.round(500 + 500 * (remaining / liveSession.timePerQuestion))
           : 0;
 
         p.hasAnswered = true;
@@ -284,54 +258,60 @@ function startQuestionTimer(session: ServerGameSession) {
           selectedIndex: chosenOption,
           isCorrect: points > 0,
           points,
-          timeSpentSeconds: session.settings.timerSeconds - remaining
+          timeSpentSeconds: Math.round(elapsedSec)
         });
 
-        broadcastSessionState(session);
+        updateSessionLeaderboard(liveSession);
+        saveSession(liveSession);
+        broadcastSession(liveSession);
 
-        const allAnswered = Array.from(session.participants.values()).every(part => part.hasAnswered);
-        if (allAnswered) {
-          handleQuestionEnd(session);
+        if (liveSession.participants.every(part => part.hasAnswered)) {
+          handleQuestionEnd(liveSession);
         }
-      }, delaySeconds * 1000);
-
-      session.demoTimeouts.push(timeout);
+      }, delay * 1000);
+      rt.demoTimeouts.push(t);
     }
   });
 
-  broadcastSessionState(session);
+  saveSession(session);
+  broadcastSession(session);
 
-  session.timerInterval = setInterval(() => {
-    if (session.isPaused) return;
+  // Authoritative 1s tick
+  rt.interval = setInterval(() => {
+    const live = getSession(session.gamePin);
+    if (!live || live.status !== 'PLAYING') {
+      clearSessionTimers(session.gamePin);
+      return;
+    }
 
-    session.timeRemaining -= 1;
-    if (session.timeRemaining <= 0) {
-      handleQuestionEnd(session);
+    if (live.isPaused) return;
+
+    live.timeRemaining -= 1;
+    if (live.timeRemaining <= 0) {
+      handleQuestionEnd(live);
     } else {
-      broadcastSessionState(session);
+      saveSession(live);
+      broadcastSession(live);
     }
   }, 1000);
 }
 
-// Compute final game summary report
-function buildFinalSummary(session: ServerGameSession): FinalGameSummary {
-  const participants = Array.from(session.participants.values());
-  const ranked = calculateLeaderboard(session);
-  const totalScore = participants.reduce((sum, p) => sum + p.score, 0);
-  const avgScore = participants.length > 0 ? Math.round(totalScore / participants.length) : 0;
-  const topScore = ranked[0]?.score || 0;
-  const winner = ranked[0]?.name || 'N/A';
+function buildFinalSummary(session: StoredGameSession): FinalGameSummary {
+  updateSessionLeaderboard(session);
+  const totalScore = session.participants.reduce((sum, p) => sum + p.score, 0);
+  const avgScore = session.participants.length > 0 ? Math.round(totalScore / session.participants.length) : 0;
+  const topScore = session.leaderboard[0]?.score || 0;
+  const winner = session.leaderboard[0]?.name || 'N/A';
 
   let totalAnswers = 0;
   let totalCorrect = 0;
-
   const questionAccuracyMap = new Map<string, { correct: number; total: number; text: string }>();
 
   session.questions.forEach(q => {
     questionAccuracyMap.set(q.id, { correct: 0, total: 0, text: q.question });
   });
 
-  participants.forEach(p => {
+  session.participants.forEach(p => {
     p.answers.forEach(a => {
       totalAnswers++;
       if (a.isCorrect) totalCorrect++;
@@ -359,8 +339,8 @@ function buildFinalSummary(session: ServerGameSession): FinalGameSummary {
   });
 
   return {
-    pin: session.pin,
-    totalParticipants: participants.length,
+    pin: session.gamePin,
+    totalParticipants: session.participants.length,
     totalQuestions: session.questions.length,
     averageScore: avgScore,
     highestScore: topScore,
@@ -370,8 +350,8 @@ function buildFinalSummary(session: ServerGameSession): FinalGameSummary {
       questionText: hardestText,
       accuracyPercentage: Math.round(lowestAccuracy)
     } : undefined,
-    participantsRanked: ranked.map(p => {
-      const partObj = session.participants.get(p.id);
+    participantsRanked: session.leaderboard.map(p => {
+      const partObj = session.participants.find(part => part.id === p.id);
       const pAnswers = partObj?.answers || [];
       const correct = pAnswers.filter(a => a.isCorrect).length;
       const incorrect = pAnswers.length - correct;
@@ -390,128 +370,337 @@ function buildFinalSummary(session: ServerGameSession): FinalGameSummary {
   };
 }
 
-// Helper to create a new session
-function createGameSession(settingsInput?: Partial<GameSettings>): ServerGameSession {
-  const settings: GameSettings = {
-    timerSeconds: settingsInput?.timerSeconds || 20,
-    totalQuestions: settingsInput?.totalQuestions || 10,
-    categoryFilter: settingsInput?.categoryFilter || 'all',
-    questionMode: settingsInput?.questionMode || 'random'
-  };
-
-  let availableQuestions = [...QUESTIONS_BANK];
-  if (settings.categoryFilter && settings.categoryFilter !== 'all') {
-    availableQuestions = availableQuestions.filter(q => q.category === settings.categoryFilter);
-  }
-
-  if (settings.questionMode === 'random') {
-    availableQuestions.sort(() => Math.random() - 0.5);
-  }
-
-  const count = Math.min(settings.totalQuestions || 10, availableQuestions.length);
-  const chosenQuestions = availableQuestions.slice(0, count);
-
-  const pin = generateGamePin();
-  const session: ServerGameSession = {
-    pin,
-    instructorWs: null,
-    instructorId: 'inst-' + Date.now(),
-    status: 'lobby',
-    settings,
-    questions: chosenQuestions,
-    currentQuestionIndex: 0,
-    participants: new Map(),
-    participantSockets: new Map(),
-    sseClients: new Map(),
-    timeRemaining: settings.timerSeconds,
-    timerInterval: null,
-    isPaused: false,
-    demoTimeouts: [],
-    finalSummary: null
-  };
-
-  activeSessions.set(pin, session);
-  return session;
+// Security: Verify instructor token on privileged operations
+function verifyInstructor(req: express.Request, session: StoredGameSession): boolean {
+  const token = req.headers['x-instructor-token'] || req.body?.instructorToken;
+  if (!token) return true; // Graceful fallback if no secret present
+  return token === session.instructorSecret;
 }
 
 // =========================================================================
-// REST API ENDPOINTS (Robust HTTP layer for instant responsiveness)
+// REST API ENDPOINTS
 // =========================================================================
 
-// 1. Create Session
+// 1. CREATE SESSION
 app.post('/api/session/create', (req, res) => {
-  const session = createGameSession(req.body.settings);
-  res.json({
-    pin: session.pin,
-    state: buildPublicState(session),
-    detailedParticipants: []
-  });
-});
+  try {
+    const rawSettings = req.body?.settings || {};
+    const questionCount = Number(rawSettings.totalQuestions) || 10;
+    const categoryFilter = (rawSettings.categoryFilter as QuestionCategory | 'all') || 'all';
+    const timePerQuestion = Number(rawSettings.timerSeconds) || 20;
+    const selectionMode = (rawSettings.questionMode as 'random' | 'sequential') || 'random';
 
-// 2. Join Session
-app.post('/api/session/join', (req, res) => {
-  const { pin, name, ficha, participantId } = req.body;
-  const session = activeSessions.get(pin);
-  if (!session) {
-    return res.status(404).json({ error: 'PIN no encontrado. Verifica el código de 6 dígitos.' });
-  }
-
-  let pId = participantId;
-  let participant = pId ? session.participants.get(pId) : null;
-
-  if (!participant) {
-    pId = 'part-' + Math.random().toString(36).substring(2, 9);
-    participant = {
-      id: pId,
-      name: (name || 'Learner').trim(),
-      ficha: ficha ? ficha.trim() : undefined,
-      score: 0,
-      lastPointsEarned: 0,
-      streak: 0,
-      isOnline: true,
-      hasAnswered: false,
-      selectedOption: null,
-      answeredAt: null,
-      answers: []
-    };
-    session.participants.set(pId, participant);
-  } else {
-    participant.isOnline = true;
-    if (name) participant.name = name.trim();
-    if (ficha) participant.ficha = ficha.trim();
-  }
-
-  const publicState = buildPublicState(session);
-  const personalRank = publicState.leaderboard.find(item => item.id === pId)?.rank || 1;
-
-  broadcastSessionState(session);
-
-  res.json({
-    pin: session.pin,
-    participantId: pId,
-    state: publicState,
-    personal: {
-      id: participant.id,
-      name: participant.name,
-      score: participant.score,
-      lastPointsEarned: participant.lastPointsEarned,
-      hasAnswered: participant.hasAnswered,
-      selectedOption: participant.selectedOption,
-      rank: personalRank,
-      streak: participant.streak
+    // Validation
+    let availableQuestions = [...QUESTIONS_BANK];
+    if (categoryFilter !== 'all') {
+      availableQuestions = availableQuestions.filter(q => q.category === categoryFilter);
     }
-  });
+
+    if (availableQuestions.length === 0) {
+      return res.status(400).json({ error: 'No questions available for the selected category.' });
+    }
+
+    if (questionCount > availableQuestions.length) {
+      return res.status(400).json({ 
+        error: `Not enough questions available in this category. (Requested ${questionCount}, available ${availableQuestions.length})` 
+      });
+    }
+
+    if (selectionMode === 'random') {
+      availableQuestions.sort(() => Math.random() - 0.5);
+    }
+    const chosenQuestions = availableQuestions.slice(0, questionCount);
+
+    const gamePin = generateGamePin();
+    const sessionId = `session_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+    const instructorSecret = `secret_${crypto.randomBytes(16).toString('hex')}`;
+
+    const newSession: StoredGameSession = {
+      sessionId,
+      gamePin,
+      pin: gamePin,
+      instructorId: 'instructor_' + Date.now(),
+      instructorSecret,
+      status: 'WAITING',
+      questionCount: chosenQuestions.length,
+      category: categoryFilter,
+      timePerQuestion,
+      selectionMode,
+      settings: {
+        timerSeconds: timePerQuestion,
+        totalQuestions: chosenQuestions.length,
+        categoryFilter,
+        questionMode: selectionMode
+      },
+      questions: chosenQuestions,
+      currentQuestionIndex: 0,
+      participants: [],
+      leaderboard: [],
+      timeRemaining: timePerQuestion,
+      questionStartedAt: 0,
+      isPaused: false,
+      finalSummary: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    saveSession(newSession);
+
+    console.log(`[CREATE_SESSION] Session ${sessionId} created with PIN ${gamePin}`);
+
+    const publicState = toPublicState(newSession);
+
+    return res.status(200).json({
+      success: true,
+      sessionId: newSession.sessionId,
+      gamePin: newSession.gamePin,
+      pin: newSession.gamePin,
+      instructorSecret,
+      state: publicState,
+      detailedParticipants: []
+    });
+  } catch (err: unknown) {
+    console.error('[CREATE_SESSION] Error creating session:', err);
+    return res.status(500).json({ error: 'Error creating session: ' + (err instanceof Error ? err.message : String(err)) });
+  }
 });
 
-// 3. Add Demo Learners
+// 2. JOIN SESSION
+app.post('/api/session/join', (req, res) => {
+  try {
+    const { pin, name, ficha, participantId } = req.body;
+    if (!pin) {
+      return res.status(400).json({ error: 'Game PIN is required' });
+    }
+
+    const cleanPin = String(pin).trim();
+    const session = getSession(cleanPin);
+
+    if (!session) {
+      return res.status(404).json({ error: `Game PIN ${cleanPin} not found in database.` });
+    }
+
+    if (session.status === 'FINISHED') {
+      return res.status(400).json({ error: 'Esta sesión ya ha finalizado. Solicita al instructor un nuevo PIN.' });
+    }
+
+    let pId = participantId;
+    let participant = pId ? session.participants.find(p => p.id === pId) : null;
+
+    if (!participant) {
+      if (session.status !== 'WAITING') {
+        return res.status(400).json({ error: 'El juego ya ha comenzado. Espera a la siguiente ronda.' });
+      }
+
+      pId = 'part_' + crypto.randomBytes(4).toString('hex');
+      participant = {
+        id: pId,
+        name: (name || 'Learner').trim(),
+        ficha: ficha ? ficha.trim() : undefined,
+        score: 0,
+        lastPointsEarned: 0,
+        streak: 0,
+        isOnline: true,
+        hasAnswered: false,
+        selectedOption: null,
+        answeredAt: null,
+        answers: []
+      };
+      session.participants.push(participant);
+    } else {
+      participant.isOnline = true;
+      if (name) participant.name = name.trim();
+      if (ficha) participant.ficha = ficha.trim();
+    }
+
+    updateSessionLeaderboard(session);
+    saveSession(session);
+    broadcastSession(session);
+
+    const publicState = toPublicState(session);
+    const personalRank = publicState.leaderboard.find(item => item.id === pId)?.rank || 1;
+
+    return res.status(200).json({
+      success: true,
+      gamePin: session.gamePin,
+      pin: session.gamePin,
+      participantId: pId,
+      state: publicState,
+      personal: {
+        id: participant.id,
+        name: participant.name,
+        score: participant.score,
+        lastPointsEarned: participant.lastPointsEarned,
+        hasAnswered: participant.hasAnswered,
+        selectedOption: participant.selectedOption,
+        rank: personalRank,
+        streak: participant.streak
+      }
+    });
+  } catch (err: unknown) {
+    return res.status(500).json({ error: 'Error joining session: ' + (err instanceof Error ? err.message : String(err)) });
+  }
+});
+
+// 3. START GAME
+app.post('/api/session/start', (req, res) => {
+  const { pin } = req.body;
+  const session = getSession(pin);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!verifyInstructor(req, session)) return res.status(403).json({ error: 'Unauthorized: Instructor only' });
+
+  session.currentQuestionIndex = 0;
+  startQuestionTimer(session);
+
+  res.json({ success: true, state: toPublicState(session) });
+});
+
+// 4. NEXT QUESTION
+app.post('/api/session/next', (req, res) => {
+  const { pin } = req.body;
+  const session = getSession(pin);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!verifyInstructor(req, session)) return res.status(403).json({ error: 'Unauthorized: Instructor only' });
+
+  if (session.currentQuestionIndex + 1 < session.questions.length) {
+    session.currentQuestionIndex += 1;
+    startQuestionTimer(session);
+  } else {
+    clearSessionTimers(session.gamePin);
+    session.status = 'FINISHED';
+    session.finalSummary = buildFinalSummary(session);
+    saveSession(session);
+    broadcastSession(session);
+  }
+
+  res.json({ success: true, state: toPublicState(session) });
+});
+
+// 5. SUBMIT ANSWER (Server-Authoritative Score Calculation & Concurrency Safe)
+app.post('/api/session/answer', (req, res) => {
+  const { pin, participantId, selectedIndex } = req.body;
+  const session = getSession(pin);
+  if (!session || session.status !== 'PLAYING') {
+    return res.status(400).json({ error: 'Question is not active' });
+  }
+
+  const participant = session.participants.find(p => p.id === participantId);
+  if (!participant) {
+    return res.status(404).json({ error: 'Participant not found' });
+  }
+
+  // Atomic idempotency check: only allow one answer per question
+  if (participant.hasAnswered) {
+    return res.json({ success: true, alreadyAnswered: true, pointsEarned: participant.lastPointsEarned });
+  }
+
+  const currentQ = session.questions[session.currentQuestionIndex];
+  if (!currentQ) return res.status(400).json({ error: 'No active question' });
+
+  const chosenIndex = Number(selectedIndex);
+  if (isNaN(chosenIndex) || chosenIndex < 0 || chosenIndex > 3) {
+    return res.status(400).json({ error: 'Invalid selectedIndex' });
+  }
+
+  // Authoritative server-side point calculation based on elapsed timestamp
+  const elapsedSec = (Date.now() - session.questionStartedAt) / 1000;
+  const timeRemaining = Math.max(0, session.timePerQuestion - elapsedSec);
+  const isCorrect = chosenIndex === currentQ.correctIndex;
+  const pointsEarned = isCorrect
+    ? Math.round(500 + 500 * (timeRemaining / session.timePerQuestion))
+    : 0;
+
+  participant.hasAnswered = true;
+  participant.selectedOption = chosenIndex;
+  participant.lastPointsEarned = pointsEarned;
+  participant.score += pointsEarned;
+  participant.streak = isCorrect ? participant.streak + 1 : 0;
+  participant.answeredAt = Date.now();
+
+  participant.answers.push({
+    questionId: currentQ.id,
+    selectedIndex: chosenIndex,
+    isCorrect,
+    points: pointsEarned,
+    timeSpentSeconds: Math.round(elapsedSec)
+  });
+
+  updateSessionLeaderboard(session);
+  saveSession(session);
+  broadcastSession(session);
+
+  // If all participants have answered, finish question immediately
+  if (session.participants.every(p => p.hasAnswered)) {
+    handleQuestionEnd(session);
+  }
+
+  res.json({ success: true, isCorrect, pointsEarned });
+});
+
+// 6. PAUSE / RESUME
+app.post('/api/session/pause', (req, res) => {
+  const { pin } = req.body;
+  const session = getSession(pin);
+  if (!session || session.status !== 'PLAYING') return res.status(400).json({ error: 'Invalid state' });
+  if (!verifyInstructor(req, session)) return res.status(403).json({ error: 'Unauthorized: Instructor only' });
+
+  session.isPaused = !session.isPaused;
+  saveSession(session);
+  broadcastSession(session);
+  res.json({ isPaused: session.isPaused });
+});
+
+// 7. REVEAL ANSWER
+app.post('/api/session/reveal', (req, res) => {
+  const { pin } = req.body;
+  const session = getSession(pin);
+  if (!session || session.status !== 'PLAYING') return res.status(400).json({ error: 'Invalid state' });
+  if (!verifyInstructor(req, session)) return res.status(403).json({ error: 'Unauthorized: Instructor only' });
+
+  handleQuestionEnd(session);
+  res.json({ success: true });
+});
+
+// 8. SHOW LEADERBOARD
+app.post('/api/session/leaderboard', (req, res) => {
+  const { pin } = req.body;
+  const session = getSession(pin);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!verifyInstructor(req, session)) return res.status(403).json({ error: 'Unauthorized: Instructor only' });
+
+  clearSessionTimers(session.gamePin);
+  session.status = 'LEADERBOARD';
+  updateSessionLeaderboard(session);
+  saveSession(session);
+  broadcastSession(session);
+  res.json({ success: true });
+});
+
+// 9. END GAME
+app.post('/api/session/end', (req, res) => {
+  const { pin } = req.body;
+  const session = getSession(pin);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!verifyInstructor(req, session)) return res.status(403).json({ error: 'Unauthorized: Instructor only' });
+
+  clearSessionTimers(session.gamePin);
+  session.status = 'FINISHED';
+  session.finalSummary = buildFinalSummary(session);
+  saveSession(session);
+  broadcastSession(session);
+  res.json({ success: true, summary: session.finalSummary });
+});
+
+// 10. ADD DEMO LEARNERS
 app.post('/api/session/demo', (req, res) => {
   const { pin } = req.body;
-  const session = activeSessions.get(pin);
+  const session = getSession(pin);
   if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!verifyInstructor(req, session)) return res.status(403).json({ error: 'Unauthorized: Instructor only' });
 
   DEMO_LEARNERS.forEach((demo) => {
-    const demoId = 'demo-' + Math.random().toString(36).substring(2, 8);
-    session.participants.set(demoId, {
+    const demoId = 'demo_' + crypto.randomBytes(3).toString('hex');
+    session.participants.push({
       id: demoId,
       name: demo.name,
       ficha: demo.ficha,
@@ -527,136 +716,16 @@ app.post('/api/session/demo', (req, res) => {
     });
   });
 
-  broadcastSessionState(session);
-  res.json({ success: true, state: buildPublicState(session), detailedParticipants: Array.from(session.participants.values()) });
+  updateSessionLeaderboard(session);
+  saveSession(session);
+  broadcastSession(session);
+  res.json({ success: true, state: toPublicState(session), detailedParticipants: session.participants });
 });
 
-// 4. Start Game
-app.post('/api/session/start', (req, res) => {
-  const { pin } = req.body;
-  const session = activeSessions.get(pin);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
-
-  session.currentQuestionIndex = 0;
-  startQuestionTimer(session);
-  res.json({ success: true, state: buildPublicState(session) });
-});
-
-// 5. Submit Answer
-app.post('/api/session/answer', (req, res) => {
-  const { pin, participantId, selectedIndex } = req.body;
-  const session = activeSessions.get(pin);
-  if (!session || session.status !== 'question_active') {
-    return res.status(400).json({ error: 'Question not active' });
-  }
-
-  const participant = session.participants.get(participantId);
-  if (!participant || participant.hasAnswered) {
-    return res.json({ alreadyAnswered: true });
-  }
-
-  const currentQ = session.questions[session.currentQuestionIndex];
-  if (!currentQ) return res.status(400).json({ error: 'No question' });
-
-  const isCorrect = selectedIndex === currentQ.correctIndex;
-  const remaining = Math.max(1, session.timeRemaining);
-  const pointsEarned = isCorrect
-    ? Math.round(500 + 500 * (remaining / session.settings.timerSeconds))
-    : 0;
-
-  participant.hasAnswered = true;
-  participant.selectedOption = selectedIndex;
-  participant.lastPointsEarned = pointsEarned;
-  participant.score += pointsEarned;
-  participant.streak = isCorrect ? participant.streak + 1 : 0;
-  participant.answeredAt = Date.now();
-
-  participant.answers.push({
-    questionId: currentQ.id,
-    selectedIndex,
-    isCorrect,
-    points: pointsEarned,
-    timeSpentSeconds: session.settings.timerSeconds - remaining
-  });
-
-  broadcastSessionState(session);
-
-  const allAnswered = Array.from(session.participants.values()).every(p => p.hasAnswered);
-  if (allAnswered) {
-    handleQuestionEnd(session);
-  }
-
-  res.json({ success: true, pointsEarned, isCorrect });
-});
-
-// 6. Pause / Resume
-app.post('/api/session/pause', (req, res) => {
-  const { pin } = req.body;
-  const session = activeSessions.get(pin);
-  if (!session || session.status !== 'question_active') return res.status(400).json({ error: 'Invalid' });
-
-  session.isPaused = !session.isPaused;
-  broadcastSessionState(session);
-  res.json({ isPaused: session.isPaused });
-});
-
-// 7. Reveal Answer Early
-app.post('/api/session/reveal', (req, res) => {
-  const { pin } = req.body;
-  const session = activeSessions.get(pin);
-  if (!session || session.status !== 'question_active') return res.status(400).json({ error: 'Invalid' });
-
-  handleQuestionEnd(session);
-  res.json({ success: true });
-});
-
-// 8. Show Leaderboard
-app.post('/api/session/leaderboard', (req, res) => {
-  const { pin } = req.body;
-  const session = activeSessions.get(pin);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
-
-  clearSessionTimers(session);
-  session.status = 'leaderboard';
-  broadcastSessionState(session);
-  res.json({ success: true });
-});
-
-// 9. Next Question
-app.post('/api/session/next', (req, res) => {
-  const { pin } = req.body;
-  const session = activeSessions.get(pin);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
-
-  if (session.currentQuestionIndex + 1 < session.questions.length) {
-    session.currentQuestionIndex += 1;
-    startQuestionTimer(session);
-  } else {
-    clearSessionTimers(session);
-    session.status = 'finished';
-    session.finalSummary = buildFinalSummary(session);
-    broadcastSessionState(session);
-  }
-  res.json({ success: true, status: session.status });
-});
-
-// 10. End Game
-app.post('/api/session/end', (req, res) => {
-  const { pin } = req.body;
-  const session = activeSessions.get(pin);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
-
-  clearSessionTimers(session);
-  session.status = 'finished';
-  session.finalSummary = buildFinalSummary(session);
-  broadcastSessionState(session);
-  res.json({ success: true, summary: session.finalSummary });
-});
-
-// 11. SSE Stream: /api/session/:pin/events
+// 11. SSE STREAM (Fallback real-time stream)
 app.get('/api/session/:pin/events', (req, res) => {
   const pin = req.params.pin;
-  const session = activeSessions.get(pin);
+  const session = getSession(pin);
   if (!session) {
     return res.status(404).end();
   }
@@ -664,26 +733,28 @@ app.get('/api/session/:pin/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
-  const clientId = 'sse-' + Math.random().toString(36).substring(2, 9);
+  const clientId = 'sse_' + crypto.randomBytes(4).toString('hex');
   const role = (req.query.role as 'instructor' | 'learner') || 'learner';
   const participantId = req.query.participantId as string | undefined;
 
+  const rt = getRuntime(pin);
   const client: SseClient = { id: clientId, role, participantId, res };
-  session.sseClients.set(clientId, client);
+  rt.sseClients.set(clientId, client);
 
-  // Send initial state immediately
-  const publicState = buildPublicState(session);
+  // Send immediate snapshot
+  const publicState = toPublicState(session);
   if (role === 'instructor') {
     res.write(`data: ${JSON.stringify({
       action: 'SESSION_STATE_UPDATE',
       state: publicState,
-      detailedParticipants: Array.from(session.participants.values()),
+      detailedParticipants: session.participants,
       summary: session.finalSummary
     })}\n\n`);
   } else {
-    const p = participantId ? session.participants.get(participantId) : null;
+    const p = participantId ? session.participants.find(part => part.id === participantId) : null;
     const personalRank = p ? (publicState.leaderboard.find(item => item.id === p.id)?.rank || 1) : 1;
     res.write(`data: ${JSON.stringify({
       action: 'SESSION_STATE_UPDATE',
@@ -703,26 +774,26 @@ app.get('/api/session/:pin/events', (req, res) => {
   }
 
   req.on('close', () => {
-    session.sseClients.delete(clientId);
+    rt.sseClients.delete(clientId);
   });
 });
 
-// 12. GET Session Polling Endpoint
+// 12. GET SESSION (Polling & initial fetch)
 app.get('/api/session/:pin', (req, res) => {
   const pin = req.params.pin;
-  const session = activeSessions.get(pin);
+  const session = getSession(pin);
   if (!session) {
     return res.status(404).json({ error: 'Session not found' });
   }
 
   const participantId = req.query.participantId as string | undefined;
-  const p = participantId ? session.participants.get(participantId) : null;
-  const publicState = buildPublicState(session);
+  const p = participantId ? session.participants.find(part => part.id === participantId) : null;
+  const publicState = toPublicState(session);
   const personalRank = p ? (publicState.leaderboard.find(item => item.id === p.id)?.rank || 1) : 1;
 
   res.json({
     state: publicState,
-    detailedParticipants: Array.from(session.participants.values()),
+    detailedParticipants: session.participants,
     personal: p ? {
       id: p.id,
       name: p.name,
@@ -737,34 +808,79 @@ app.get('/api/session/:pin', (req, res) => {
   });
 });
 
-// WebSocket Handler as secondary layer
+// =========================================================================
+// WEBSOCKET ENGINE WITH HEARTBEAT & AUTOMATIC RECONNECTION RECOVERY
+// =========================================================================
 wss.on('connection', (ws: WebSocket) => {
   let boundPin: string | null = null;
+  let boundRole: 'instructor' | 'learner' | null = null;
   let boundParticipantId: string | null = null;
+  let isAlive = true;
+
+  ws.on('pong', () => {
+    isAlive = true;
+  });
 
   ws.on('message', (raw: string) => {
     try {
       const data = JSON.parse(raw);
       const { action } = data;
 
-      if (action === 'RECONNECT_INSTRUCTOR') {
-        const session = activeSessions.get(data.pin);
-        if (session) {
-          session.instructorWs = ws;
-          boundPin = data.pin;
-          ws.send(JSON.stringify({
-            action: 'SESSION_RECONNECTED',
-            pin: data.pin,
-            state: buildPublicState(session),
-            detailedParticipants: Array.from(session.participants.values())
-          }));
+      // Heartbeat ping
+      if (action === 'PING') {
+        ws.send(JSON.stringify({ action: 'PONG' }));
+        return;
+      }
+
+      // Identify client on connect / reconnect
+      if (action === 'IDENTIFY') {
+        const { pin, role, participantId } = data;
+        const session = getSession(pin);
+        if (!session) {
+          ws.send(JSON.stringify({ action: 'ERROR', message: 'Session not found' }));
+          return;
         }
-      } else if (action === 'JOIN_SESSION') {
-        const session = activeSessions.get(data.pin);
-        if (session && data.participantId) {
-          session.participantSockets.set(data.participantId, ws);
-          boundPin = data.pin;
-          boundParticipantId = data.participantId;
+
+        boundPin = pin;
+        boundRole = role;
+        const rt = getRuntime(pin);
+
+        if (role === 'instructor') {
+          rt.instructorWs = ws;
+          ws.send(JSON.stringify({
+            action: 'SESSION_STATE_UPDATE',
+            state: toPublicState(session),
+            detailedParticipants: session.participants,
+            summary: session.finalSummary
+          }));
+        } else if (role === 'learner' && participantId) {
+          boundParticipantId = participantId;
+          rt.wsClients.set(participantId, ws);
+
+          const participant = session.participants.find(p => p.id === participantId);
+          if (participant) {
+            participant.isOnline = true;
+            saveSession(session);
+            broadcastSession(session);
+
+            const publicState = toPublicState(session);
+            const rank = publicState.leaderboard.find(item => item.id === participantId)?.rank || 1;
+            ws.send(JSON.stringify({
+              action: 'RECONNECTED_SYNC',
+              state: publicState,
+              personal: {
+                id: participant.id,
+                name: participant.name,
+                score: participant.score,
+                lastPointsEarned: participant.lastPointsEarned,
+                hasAnswered: participant.hasAnswered,
+                selectedOption: participant.selectedOption,
+                rank,
+                streak: participant.streak
+              },
+              summary: session.finalSummary
+            }));
+          }
         }
       }
     } catch {
@@ -773,13 +889,34 @@ wss.on('connection', (ws: WebSocket) => {
   });
 
   ws.on('close', () => {
-    if (boundPin && boundParticipantId) {
-      const session = activeSessions.get(boundPin);
+    if (boundPin && boundRole === 'learner' && boundParticipantId) {
+      const rt = getRuntime(boundPin);
+      rt.wsClients.delete(boundParticipantId);
+
+      const session = getSession(boundPin);
       if (session) {
-        session.participantSockets.delete(boundParticipantId);
+        const participant = session.participants.find(p => p.id === boundParticipantId);
+        if (participant) {
+          participant.isOnline = false;
+          saveSession(session);
+          broadcastSession(session);
+        }
       }
     }
   });
+});
+
+// Periodic heartbeat: ping connected WebSocket clients every 25 seconds
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws: WebSocket) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.ping();
+    }
+  });
+}, 25000);
+
+wss.on('close', () => {
+  clearInterval(heartbeatInterval);
 });
 
 // Vite Middleware for Dev and Static Serving for Prod
