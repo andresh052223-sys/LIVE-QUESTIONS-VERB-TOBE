@@ -1,13 +1,22 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { Question, Participant, GameSettings, PublicSessionState, FinalGameSummary } from '../types/game';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, '../../data');
-const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
-const SESSIONS_TMP_FILE = path.join(DATA_DIR, 'sessions.tmp.json');
+// Robust, absolute storage location based on project root (process.cwd())
+export function getDataDir(): string {
+  if (process.env.DATA_DIR) {
+    return path.resolve(process.env.DATA_DIR);
+  }
+  return path.resolve(process.cwd(), 'data');
+}
+
+export function getSessionsFilePath(): string {
+  return path.join(getDataDir(), 'sessions.json');
+}
+
+export function getSessionsTmpFilePath(): string {
+  return path.join(getDataDir(), 'sessions.tmp.json');
+}
 
 export interface StoredGameSession {
   sessionId: string;
@@ -46,37 +55,81 @@ const sessionCache = new Map<string, StoredGameSession>();
 let persistTimeout: NodeJS.Timeout | null = null;
 let isWriting = false;
 
-// Ensure storage directory exists
-function ensureStorage() {
+// Ensure storage directory and file exist automatically
+export function ensureStorage(): void {
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    const dataDir = getDataDir();
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
-    if (!fs.existsSync(SESSIONS_FILE)) {
-      fs.writeFileSync(SESSIONS_FILE, JSON.stringify({}, null, 2), 'utf-8');
+    const sessionsFile = getSessionsFilePath();
+    if (!fs.existsSync(sessionsFile)) {
+      fs.writeFileSync(sessionsFile, JSON.stringify({}, null, 2), 'utf-8');
     }
   } catch (err) {
-    console.error('[SessionStore] Error initializing storage directory:', err);
+    console.error('[SessionStore] Error ensuring storage directory and file:', err);
   }
 }
 
 // Load sessions from disk on server startup
-export function loadSessionsFromDisk() {
+export function loadSessionsFromDisk(): void {
   ensureStorage();
   try {
-    const raw = fs.readFileSync(SESSIONS_FILE, 'utf-8');
+    const sessionsFile = getSessionsFilePath();
+    if (!fs.existsSync(sessionsFile)) {
+      return;
+    }
+    const raw = fs.readFileSync(sessionsFile, 'utf-8');
     const parsed = JSON.parse(raw);
     Object.keys(parsed).forEach(pin => {
       sessionCache.set(pin, parsed[pin]);
     });
-    console.log(`[SessionStore] Loaded ${sessionCache.size} sessions from persistent storage.`);
+    console.log(`[SessionStore] Loaded ${sessionCache.size} sessions from persistent storage (${sessionsFile}).`);
   } catch (err) {
     console.warn('[SessionStore] Could not read sessions.json, starting with clean memory store:', err);
   }
 }
 
-// Asynchronous atomic disk flush (prevents event loop blocking during concurrent student answers)
-export function schedulePersist() {
+// Explicit disk write function with atomic rename and direct write fallback
+export async function saveSessionsToDisk(): Promise<boolean> {
+  const dataDir = getDataDir();
+  const sessionsFile = getSessionsFilePath();
+  const tmpFile = getSessionsTmpFilePath();
+
+  try {
+    await fs.promises.mkdir(dataDir, { recursive: true });
+    const obj: Record<string, StoredGameSession> = {};
+    sessionCache.forEach((sess, pin) => {
+      obj[pin] = sess;
+    });
+
+    const dataStr = JSON.stringify(obj, null, 2);
+
+    try {
+      await fs.promises.writeFile(tmpFile, dataStr, 'utf-8');
+      await fs.promises.rename(tmpFile, sessionsFile);
+      return true;
+    } catch (atomicErr) {
+      // Fallback: direct write if rename fails (e.g. cross-filesystem or OS lock)
+      console.warn('[SessionStore] Atomic rename failed, falling back to direct write:', atomicErr);
+      await fs.promises.writeFile(sessionsFile, dataStr, 'utf-8');
+      try {
+        if (fs.existsSync(tmpFile)) {
+          await fs.promises.unlink(tmpFile);
+        }
+      } catch {
+        // ignore unlink error
+      }
+      return true;
+    }
+  } catch (err) {
+    console.error('[SessionStore] Fatal error writing sessions to disk:', err);
+    return false;
+  }
+}
+
+// Asynchronous debounced disk flush
+export function schedulePersist(): void {
   if (persistTimeout) return;
 
   persistTimeout = setTimeout(async () => {
@@ -88,21 +141,11 @@ export function schedulePersist() {
 
     isWriting = true;
     try {
-      const obj: Record<string, StoredGameSession> = {};
-      sessionCache.forEach((sess, pin) => {
-        obj[pin] = sess;
-      });
-
-      const dataStr = JSON.stringify(obj, null, 2);
-      // Atomic write: write to temp file then rename
-      await fs.promises.writeFile(SESSIONS_TMP_FILE, dataStr, 'utf-8');
-      await fs.promises.rename(SESSIONS_TMP_FILE, SESSIONS_FILE);
-    } catch (err) {
-      console.error('[SessionStore] Atomic write error:', err);
+      await saveSessionsToDisk();
     } finally {
       isWriting = false;
     }
-  }, 80); // Debounce by 80ms to batch rapid answer bursts
+  }, 80);
 }
 
 export function getSession(pin: string): StoredGameSession | undefined {
@@ -116,6 +159,16 @@ export function saveSession(session: StoredGameSession): void {
   session.updatedAt = new Date().toISOString();
   sessionCache.set(session.gamePin, session);
   schedulePersist();
+}
+
+export function createSession(session: StoredGameSession): StoredGameSession {
+  saveSession(session);
+  return session;
+}
+
+export function updateSession(session: StoredGameSession): StoredGameSession {
+  saveSession(session);
+  return session;
 }
 
 export function getAllSessions(): StoredGameSession[] {

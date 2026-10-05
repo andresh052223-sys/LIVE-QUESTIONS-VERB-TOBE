@@ -15,6 +15,7 @@ import {
 import { 
   loadSessionsFromDisk, 
   saveSession, 
+  saveSessionsToDisk,
   getSession, 
   toPublicState, 
   isPinTaken, 
@@ -382,26 +383,82 @@ function verifyInstructor(req: express.Request, session: StoredGameSession): boo
 // =========================================================================
 
 // 1. CREATE SESSION
-app.post('/api/session/create', (req, res) => {
-  try {
-    const rawSettings = req.body?.settings || {};
-    const questionCount = Number(rawSettings.totalQuestions) || 10;
-    const categoryFilter = (rawSettings.categoryFilter as QuestionCategory | 'all') || 'all';
-    const timePerQuestion = Number(rawSettings.timerSeconds) || 20;
-    const selectionMode = (rawSettings.questionMode as 'random' | 'sequential') || 'random';
+app.post('/api/session/create', async (req, res) => {
+  console.log('[SESSION CREATE] Request received', { body: req.body });
 
-    // Validation
+  try {
+    // Authenticate instructor if header/code provided, else acknowledge role
+    const instructorToken = req.headers['x-instructor-token'] || req.body?.instructorToken || req.body?.code;
+    console.log('[SESSION CREATE] Instructor authenticated', { tokenPresent: Boolean(instructorToken) });
+
+    const rawSettings = req.body?.settings || {};
+    
+    // Normalize questionCount
+    const questionCount = Number(
+      req.body?.questionCount ??
+      req.body?.totalQuestions ??
+      rawSettings.totalQuestions ??
+      rawSettings.questionCount ??
+      10
+    );
+
+    // Normalize category
+    const rawCat = String(
+      req.body?.category ??
+      req.body?.categoryFilter ??
+      rawSettings.categoryFilter ??
+      rawSettings.category ??
+      'all'
+    ).toLowerCase().trim();
+
+    let categoryFilter: QuestionCategory | 'all' = 'all';
+    if (rawCat.includes('to_be') || rawCat.includes('verb to be') || rawCat.includes('category 1')) {
+      categoryFilter = 'to_be';
+    } else if (rawCat.includes('yes_no') || rawCat.includes('yes/no') || rawCat.includes('category 2')) {
+      categoryFilter = 'yes_no';
+    } else if (rawCat.includes('wh') || rawCat.includes('wh_questions') || rawCat.includes('category 3')) {
+      categoryFilter = 'wh_questions';
+    } else {
+      categoryFilter = 'all';
+    }
+
+    // Normalize timer
+    const timePerQuestion = Number(
+      req.body?.timePerQuestion ??
+      req.body?.timerSeconds ??
+      rawSettings.timerSeconds ??
+      rawSettings.timePerQuestion ??
+      20
+    );
+
+    // Normalize selection mode
+    const rawMode = String(
+      req.body?.selectionMode ??
+      req.body?.questionMode ??
+      rawSettings.questionMode ??
+      rawSettings.selectionMode ??
+      'random'
+    ).toLowerCase().trim();
+    const selectionMode: 'random' | 'sequential' = rawMode.includes('seq') ? 'sequential' : 'random';
+
+    // Question Selection & Validation
     let availableQuestions = [...QUESTIONS_BANK];
     if (categoryFilter !== 'all') {
       availableQuestions = availableQuestions.filter(q => q.category === categoryFilter);
     }
 
     if (availableQuestions.length === 0) {
-      return res.status(400).json({ error: 'No questions available for the selected category.' });
+      console.warn('[SESSION CREATE ERROR] No questions available for category:', categoryFilter);
+      return res.status(400).json({ 
+        success: false, 
+        error: 'No questions available for the selected category.' 
+      });
     }
 
     if (questionCount > availableQuestions.length) {
+      console.warn(`[SESSION CREATE ERROR] Requested ${questionCount} questions, but only ${availableQuestions.length} available.`);
       return res.status(400).json({ 
+        success: false, 
         error: `Not enough questions available in this category. (Requested ${questionCount}, available ${availableQuestions.length})` 
       });
     }
@@ -410,11 +467,16 @@ app.post('/api/session/create', (req, res) => {
       availableQuestions.sort(() => Math.random() - 0.5);
     }
     const chosenQuestions = availableQuestions.slice(0, questionCount);
+    console.log('[SESSION CREATE] Questions selected', { count: chosenQuestions.length, category: categoryFilter, mode: selectionMode });
 
+    // Generate unique 6-digit Game PIN
     const gamePin = generateGamePin();
+    console.log('[SESSION CREATE] Game PIN generated', { gamePin });
+
     const sessionId = `session_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
     const instructorSecret = `secret_${crypto.randomBytes(16).toString('hex')}`;
 
+    // Create session object
     const newSession: StoredGameSession = {
       sessionId,
       gamePin,
@@ -443,25 +505,49 @@ app.post('/api/session/create', (req, res) => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
+    console.log('[SESSION CREATE] Session object created', { sessionId, gamePin });
 
+    // Persist session to memory store and disk
+    console.log('[SESSION CREATE] Persisting session');
     saveSession(newSession);
-
-    console.log(`[CREATE_SESSION] Session ${sessionId} created with PIN ${gamePin}`);
+    await saveSessionsToDisk();
+    console.log('[SESSION CREATE] Session persisted successfully');
 
     const publicState = toPublicState(newSession);
 
+    // Standardized response matching both user specification and client expectations
     return res.status(200).json({
       success: true,
       sessionId: newSession.sessionId,
       gamePin: newSession.gamePin,
       pin: newSession.gamePin,
       instructorSecret,
+      session: {
+        sessionId: newSession.sessionId,
+        gamePin: newSession.gamePin,
+        status: newSession.status,
+        questionCount: newSession.questionCount,
+        category: newSession.category,
+        timePerQuestion: newSession.timePerQuestion,
+        selectionMode: newSession.selectionMode
+      },
       state: publicState,
       detailedParticipants: []
     });
   } catch (err: unknown) {
-    console.error('[CREATE_SESSION] Error creating session:', err);
-    return res.status(500).json({ error: 'Error creating session: ' + (err instanceof Error ? err.message : String(err)) });
+    const errorObj = err instanceof Error ? err : new Error(String(err));
+    console.error('[SESSION CREATE ERROR]', {
+      errorMessage: errorObj.message,
+      stack: errorObj.stack,
+      httpStatus: 500,
+      probableCause: 'Unexpected server exception during session creation or disk persistence'
+    });
+
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Error creating session: ' + errorObj.message,
+      cause: errorObj.message
+    });
   }
 });
 

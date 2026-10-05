@@ -207,21 +207,56 @@ export function useGameSocket(): UseGameSocketReturn {
       const res = await fetch('/api/session/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings })
+        body: JSON.stringify({ 
+          settings,
+          questionCount: settings.totalQuestions,
+          category: settings.categoryFilter,
+          timePerQuestion: settings.timerSeconds,
+          selectionMode: settings.questionMode
+        })
       });
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        const message = errorData.error || 'Error al crear la sesión en la base de datos';
+        const message = errorData.error || `Error al crear la sesión (HTTP ${res.status})`;
+        console.error('[useGameSocket] Error creating session:', res.status, errorData);
         setErrorMessage(message);
         throw new Error(message);
       }
 
       const data = await res.json();
-      localStorage.setItem('to_be_active_pin', data.gamePin || data.pin);
-      setSessionState(data.state);
+      if (!data.success) {
+        const message = data.error || 'Error desconocido al crear la sesión';
+        console.error('[useGameSocket] Session creation unsuccessful:', message);
+        setErrorMessage(message);
+        throw new Error(message);
+      }
+
+      const pin = data.gamePin || data.pin || data.session?.gamePin;
+      if (pin) {
+        localStorage.setItem('to_be_active_pin', pin);
+      }
+      if (data.instructorSecret) {
+        localStorage.setItem('to_be_instructor_secret', data.instructorSecret);
+      }
+
+      const state: PublicSessionState = data.state || {
+        pin: pin || '',
+        status: 'lobby',
+        currentQuestionIndex: 0,
+        totalQuestions: data.session?.questionCount || settings.totalQuestions || 10,
+        timeRemaining: data.session?.timePerQuestion || settings.timerSeconds || 20,
+        totalTimerSeconds: data.session?.timePerQuestion || settings.timerSeconds || 20,
+        isPaused: false,
+        participantsCount: 0,
+        answeredCount: 0,
+        answerDistribution: [0, 0, 0, 0],
+        leaderboard: []
+      };
+
+      setSessionState(state);
       setDetailedParticipants(data.detailedParticipants || []);
-      return data.state;
+      return state;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error desconocido al crear sesión';
       setErrorMessage(msg);
