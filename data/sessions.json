@@ -1,4 +1,183 @@
 {
+  "233147": {
+    "sessionId": "session_1791236410775_ebc73d",
+    "gamePin": "233147",
+    "pin": "233147",
+    "instructorId": "instructor_1791236410775",
+    "instructorSecret": "secret_8b4ef4f70356a4ad99ddb972da3f89a1",
+    "status": "WAITING",
+    "questionCount": 10,
+    "category": "all",
+    "timePerQuestion": 20,
+    "selectionMode": "random",
+    "settings": {
+      "timerSeconds": 20,
+      "totalQuestions": 10,
+      "categoryFilter": "all",
+      "questionMode": "random"
+    },
+    "questions": [
+      {
+        "id": "tb-01",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "She ___ a student.",
+        "options": [
+          "am",
+          "is",
+          "are",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "Con el pronombre \"She\" usamos la forma \"is\" en presente simple.",
+        "difficulty": "easy"
+      },
+      {
+        "id": "yn-14",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "___ your parents at home right now?",
+        "options": [
+          "Is",
+          "Are",
+          "Am",
+          "Do"
+        ],
+        "correctIndex": 1,
+        "explanation": "\"Your parents\" es plural (they), requiere \"Are your parents...?\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-08",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "You and I ___ best friends.",
+        "options": [
+          "am",
+          "is",
+          "are",
+          "be"
+        ],
+        "correctIndex": 2,
+        "explanation": "\"You and I\" equivale al pronombre \"We\" (nosotros), por lo que se usa \"are\".",
+        "difficulty": "medium"
+      },
+      {
+        "id": "tb-16",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "David ___ twenty years old.",
+        "options": [
+          "have",
+          "has",
+          "is",
+          "are"
+        ],
+        "correctIndex": 2,
+        "explanation": "¡En inglés la edad se expresa con el verbo TO BE, no con \"have\"!",
+        "difficulty": "medium"
+      },
+      {
+        "id": "tb-20",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "English and French ___ global languages.",
+        "options": [
+          "is",
+          "are",
+          "am",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "Dos idiomas juntos forman un sujeto compuesto plural: \"are\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-07",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "My brother ___ at home right now; he is at work.",
+        "options": [
+          "isn't",
+          "aren't",
+          "am not",
+          "not is"
+        ],
+        "correctIndex": 0,
+        "explanation": "\"My brother\" es tercera persona singular (he), la forma negativa es \"isn't\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "yn-12",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "Is it cold outside today?",
+        "options": [
+          "No, it isn't.",
+          "No, it aren't.",
+          "No, it am not.",
+          "Yes, he is."
+        ],
+        "correctIndex": 0,
+        "explanation": "Respuesta negativa corta con \"it\": \"No, it isn't.\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "yn-04",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "Are they ready for the presentation?",
+        "options": [
+          "No, they isn't.",
+          "No, they aren't.",
+          "No, they not are.",
+          "Yes, they is."
+        ],
+        "correctIndex": 1,
+        "explanation": "La respuesta corta negativa para \"they\" es \"No, they aren't.\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "yn-13",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "Are you and Camilo classmates?",
+        "options": [
+          "Yes, I am.",
+          "Yes, we are.",
+          "Yes, they are.",
+          "No, he isn't."
+        ],
+        "correctIndex": 1,
+        "explanation": "\"You and Camilo\" = ustedes. Al responder los dos dicen \"Yes, we are.\"",
+        "difficulty": "medium"
+      },
+      {
+        "id": "wh-16",
+        "category": "wh_questions",
+        "categoryLabel": "WH Questions",
+        "question": "What time ___ it right now?",
+        "options": [
+          "are",
+          "is",
+          "am",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "La pregunta clásica de la hora en inglés es: \"What time is it?\"",
+        "difficulty": "easy"
+      }
+    ],
+    "currentQuestionIndex": 0,
+    "participants": [],
+    "leaderboard": [],
+    "timeRemaining": 20,
+    "questionStartedAt": 0,
+    "isPaused": false,
+    "finalSummary": null,
+    "createdAt": "2026-10-05T21:40:10.775Z",
+    "updatedAt": "2026-10-05T21:40:10.775Z"
+  },
   "242570": {
     "sessionId": "session_1791234225620_d664d5",
     "gamePin": "242570",
@@ -568,6 +747,364 @@
     "updatedAt": "2026-10-05T19:17:41.895Z",
     "questionStartedAt": 1791227861895
   },
+  "309231": {
+    "sessionId": "session_1791236555350_f97c99",
+    "gamePin": "309231",
+    "pin": "309231",
+    "instructorId": "instructor_1791236555350",
+    "instructorSecret": "secret_36cd917d5f6cb17049b3975bb22a508b",
+    "status": "WAITING",
+    "questionCount": 10,
+    "category": "all",
+    "timePerQuestion": 20,
+    "selectionMode": "random",
+    "settings": {
+      "timerSeconds": 20,
+      "totalQuestions": 10,
+      "categoryFilter": "all",
+      "questionMode": "random"
+    },
+    "questions": [
+      {
+        "id": "tb-15",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "My parents ___ from Medellin, Colombia.",
+        "options": [
+          "is",
+          "are",
+          "am",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "\"My parents\" equivale a \"They\", por lo que corresponde \"are\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "yn-07",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "Are we in the correct classroom?",
+        "options": [
+          "Yes, we is.",
+          "Yes, we are.",
+          "No, we isn't.",
+          "Yes, you am."
+        ],
+        "correctIndex": 1,
+        "explanation": "Con \"we\" la respuesta afirmativa es \"Yes, we are.\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "wh-10",
+        "category": "wh_questions",
+        "categoryLabel": "WH Questions",
+        "question": "___ is that girl near the door? - She is Laura.",
+        "options": [
+          "What",
+          "Where",
+          "Who",
+          "When"
+        ],
+        "correctIndex": 2,
+        "explanation": "Usamos \"Who\" para preguntar por la identidad de una persona.",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-09",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "The classroom ___ cold in the mornings.",
+        "options": [
+          "are",
+          "is",
+          "am",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "\"The classroom\" es un sustantivo singular (it), por lo que lleva \"is\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "wh-04",
+        "category": "wh_questions",
+        "categoryLabel": "WH Questions",
+        "question": "How ___ you today?",
+        "options": [
+          "is",
+          "are",
+          "am",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "El saludo común es \"How are you today?\" usando \"are\" con \"you\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "wh-02",
+        "category": "wh_questions",
+        "categoryLabel": "WH Questions",
+        "question": "What ___ your name?",
+        "options": [
+          "are",
+          "is",
+          "am",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "\"Your name\" es tercera persona singular (it), por tanto se usa \"is\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "wh-14",
+        "category": "wh_questions",
+        "categoryLabel": "WH Questions",
+        "question": "___ are those people? - They are our new apprentices.",
+        "options": [
+          "Who",
+          "Where",
+          "When",
+          "Why"
+        ],
+        "correctIndex": 0,
+        "explanation": "\"Who are those people?\" pregunta por la identidad de varias personas.",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-12",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "Which sentence has the correct contraction?",
+        "options": [
+          "She's an architect.",
+          "She're an architect.",
+          "She'm an architect.",
+          "She'be an architect."
+        ],
+        "correctIndex": 0,
+        "explanation": "La contracción de \"She is\" es \"She's\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-01",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "She ___ a student.",
+        "options": [
+          "am",
+          "is",
+          "are",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "Con el pronombre \"She\" usamos la forma \"is\" en presente simple.",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-06",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "We ___ ready for the English challenge!",
+        "options": [
+          "am",
+          "is",
+          "are",
+          "be"
+        ],
+        "correctIndex": 2,
+        "explanation": "\"We\" es la primera persona del plural y se conjuga con \"are\".",
+        "difficulty": "easy"
+      }
+    ],
+    "currentQuestionIndex": 0,
+    "participants": [],
+    "leaderboard": [],
+    "timeRemaining": 20,
+    "questionStartedAt": 0,
+    "isPaused": false,
+    "finalSummary": null,
+    "createdAt": "2026-10-05T21:42:35.350Z",
+    "updatedAt": "2026-10-05T21:42:35.350Z"
+  },
+  "323017": {
+    "sessionId": "session_1791236557704_73e680",
+    "gamePin": "323017",
+    "pin": "323017",
+    "instructorId": "instructor_1791236557704",
+    "instructorSecret": "secret_32553bf2f8e560b3618a682ab58e29b4",
+    "status": "WAITING",
+    "questionCount": 10,
+    "category": "all",
+    "timePerQuestion": 20,
+    "selectionMode": "random",
+    "settings": {
+      "timerSeconds": 20,
+      "totalQuestions": 10,
+      "categoryFilter": "all",
+      "questionMode": "random"
+    },
+    "questions": [
+      {
+        "id": "yn-03",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "___ she your English instructor?",
+        "options": [
+          "Are",
+          "Is",
+          "Am",
+          "Be"
+        ],
+        "correctIndex": 1,
+        "explanation": "Para preguntas con \"she\" colocamos \"Is\" al inicio de la oración.",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-02",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "I ___ very happy to meet you.",
+        "options": [
+          "are",
+          "is",
+          "am",
+          "be"
+        ],
+        "correctIndex": 2,
+        "explanation": "Con el pronombre \"I\" siempre usamos la forma \"am\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-10",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "I ___ an apprentice at SENA.",
+        "options": [
+          "is",
+          "are",
+          "am",
+          "be"
+        ],
+        "correctIndex": 2,
+        "explanation": "La primera persona \"I\" se conjuga con \"am\": \"I am an apprentice\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "wh-05",
+        "category": "wh_questions",
+        "categoryLabel": "WH Questions",
+        "question": "What ___ your job?",
+        "options": [
+          "am",
+          "are",
+          "is",
+          "be"
+        ],
+        "correctIndex": 2,
+        "explanation": "\"Your job\" es singular (it), por lo que se formula con \"is\": \"What is your job?\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-15",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "My parents ___ from Medellin, Colombia.",
+        "options": [
+          "is",
+          "are",
+          "am",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "\"My parents\" equivale a \"They\", por lo que corresponde \"are\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "wh-02",
+        "category": "wh_questions",
+        "categoryLabel": "WH Questions",
+        "question": "What ___ your name?",
+        "options": [
+          "are",
+          "is",
+          "am",
+          "be"
+        ],
+        "correctIndex": 1,
+        "explanation": "\"Your name\" es tercera persona singular (it), por tanto se usa \"is\".",
+        "difficulty": "easy"
+      },
+      {
+        "id": "yn-12",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "Is it cold outside today?",
+        "options": [
+          "No, it isn't.",
+          "No, it aren't.",
+          "No, it am not.",
+          "Yes, he is."
+        ],
+        "correctIndex": 0,
+        "explanation": "Respuesta negativa corta con \"it\": \"No, it isn't.\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "yn-16",
+        "category": "yes_no",
+        "categoryLabel": "Yes / No Questions",
+        "question": "Are they from Canada?",
+        "options": [
+          "Yes, they are.",
+          "Yes, they is.",
+          "No, they am not.",
+          "Yes, we is."
+        ],
+        "correctIndex": 0,
+        "explanation": "La respuesta afirmativa corta correcta para \"they\" es \"Yes, they are.\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "wh-13",
+        "category": "wh_questions",
+        "categoryLabel": "WH Questions",
+        "question": "Where ___ Bogotá located?",
+        "options": [
+          "are",
+          "am",
+          "is",
+          "be"
+        ],
+        "correctIndex": 2,
+        "explanation": "Bogotá es una ciudad singular: \"Where is Bogotá located?\"",
+        "difficulty": "easy"
+      },
+      {
+        "id": "tb-08",
+        "category": "to_be",
+        "categoryLabel": "Verb TO BE",
+        "question": "You and I ___ best friends.",
+        "options": [
+          "am",
+          "is",
+          "are",
+          "be"
+        ],
+        "correctIndex": 2,
+        "explanation": "\"You and I\" equivale al pronombre \"We\" (nosotros), por lo que se usa \"are\".",
+        "difficulty": "medium"
+      }
+    ],
+    "currentQuestionIndex": 0,
+    "participants": [],
+    "leaderboard": [],
+    "timeRemaining": 20,
+    "questionStartedAt": 0,
+    "isPaused": false,
+    "finalSummary": null,
+    "createdAt": "2026-10-05T21:42:37.704Z",
+    "updatedAt": "2026-10-05T21:42:37.704Z"
+  },
   "370344": {
     "sessionId": "session_1791234345759_316434",
     "gamePin": "370344",
@@ -738,13 +1275,38 @@
       }
     ],
     "currentQuestionIndex": 0,
-    "participants": [],
-    "leaderboard": [],
+    "participants": [
+      {
+        "id": "part_6f7b7af3",
+        "name": "Test Learner",
+        "ficha": "2698741",
+        "score": 0,
+        "lastPointsEarned": 0,
+        "streak": 0,
+        "isOnline": true,
+        "hasAnswered": false,
+        "selectedOption": null,
+        "answeredAt": null,
+        "answers": []
+      }
+    ],
+    "leaderboard": [
+      {
+        "id": "part_6f7b7af3",
+        "name": "Test Learner",
+        "ficha": "2698741",
+        "score": 0,
+        "streak": 0,
+        "lastPoints": 0,
+        "isOnline": true,
+        "rank": 1
+      }
+    ],
     "timeRemaining": 20,
     "questionStartedAt": 0,
     "isPaused": false,
     "finalSummary": null,
     "createdAt": "2026-10-05T21:05:45.759Z",
-    "updatedAt": "2026-10-05T21:05:45.760Z"
+    "updatedAt": "2026-10-05T21:05:49.916Z"
   }
 }

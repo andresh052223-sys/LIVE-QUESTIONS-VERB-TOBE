@@ -33,6 +33,18 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// Global HTTP Logger and CORS headers
+app.use((req, res, next) => {
+  console.log(`[HTTP ${req.method}] ${req.url}`);
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-instructor-token');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Initialize persistent storage from disk
 loadSessionsFromDisk();
 
@@ -383,7 +395,8 @@ function verifyInstructor(req: express.Request, session: StoredGameSession): boo
 // =========================================================================
 
 // 1. CREATE SESSION
-app.post('/api/session/create', async (req, res) => {
+app.post(['/api/session/create', '/api/session/create/'], async (req, res) => {
+  console.log('[SESSION CREATE] REQUEST REACHED SERVER');
   console.log('[SESSION CREATE] Request received', { body: req.body });
 
   try {
@@ -867,6 +880,9 @@ app.get('/api/session/:pin/events', (req, res) => {
 // 12. GET SESSION (Polling & initial fetch)
 app.get('/api/session/:pin', (req, res) => {
   const pin = req.params.pin;
+  if (pin === 'create' || pin === 'join' || pin === 'start' || pin === 'events') {
+    return res.status(400).json({ error: `Invalid session PIN: ${pin}` });
+  }
   const session = getSession(pin);
   if (!session) {
     return res.status(404).json({ error: 'Session not found' });
