@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, ArrowRight, ShieldCheck, GraduationCap, Users } from 'lucide-react';
+import { Sparkles, ArrowRight, ShieldCheck } from 'lucide-react';
 
 interface AccessGateProps {
   onRoleGranted: (role: 'learner' | 'instructor') => void;
@@ -13,26 +13,14 @@ export const AccessGate: React.FC<AccessGateProps> = ({ onRoleGranted }) => {
     e.preventDefault();
     const clean = accessCode.trim().toUpperCase();
 
-    if (clean === 'SENA2026') {
+    if (clean === 'SENA2026' || clean === 'SENA60') {
       localStorage.setItem('to_be_role', 'learner');
       onRoleGranted('learner');
-    } else if (clean === 'TEACHER2026') {
+    } else if (clean === 'TEACHER2026' || clean === '60') {
       localStorage.setItem('to_be_role', 'instructor');
       onRoleGranted('instructor');
     } else {
       setError('Código de acceso no válido. Por favor verifica e intenta nuevamente.');
-    }
-  };
-
-  const handleQuickCode = (code: string) => {
-    setAccessCode(code);
-    setError(null);
-    if (code === 'SENA2026') {
-      localStorage.setItem('to_be_role', 'learner');
-      onRoleGranted('learner');
-    } else if (code === 'TEACHER2026') {
-      localStorage.setItem('to_be_role', 'instructor');
-      onRoleGranted('instructor');
     }
   };
 
@@ -67,13 +55,13 @@ export const AccessGate: React.FC<AccessGateProps> = ({ onRoleGranted }) => {
               <div className="relative">
                 <input
                   id="code"
-                  type="text"
+                  type="password"
                   value={accessCode}
                   onChange={(e) => {
                     setAccessCode(e.target.value);
                     if (error) setError(null);
                   }}
-                  placeholder="Ej: SENA2026 o TEACHER2026"
+                  placeholder="Ingresa tu código de acceso"
                   className="w-full px-4 py-3.5 rounded-xl bg-slate-950/80 border border-slate-700/80 text-white font-mono text-center tracking-widest text-lg uppercase placeholder:normal-case placeholder:tracking-normal placeholder:font-sans placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
                   autoFocus
                 />
@@ -94,42 +82,6 @@ export const AccessGate: React.FC<AccessGateProps> = ({ onRoleGranted }) => {
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
-
-          {/* Quick Access Badges for convenience */}
-          <div className="mt-8 pt-6 border-t border-slate-800/80">
-            <p className="text-xs text-center text-slate-400 mb-3 font-medium">
-              Acceso rápido para prueba:
-            </p>
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => handleQuickCode('SENA2026')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-all text-left group cursor-pointer"
-              >
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 mb-0.5">
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Aprendiz</span>
-                </div>
-                <span className="text-[11px] font-mono text-slate-400 group-hover:text-slate-200">
-                  SENA2026
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickCode('TEACHER2026')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-all text-left group cursor-pointer"
-              >
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-400 mb-0.5">
-                  <GraduationCap className="w-3.5 h-3.5" />
-                  <span>Instructor</span>
-                </div>
-                <span className="text-[11px] font-mono text-slate-400 group-hover:text-slate-200">
-                  TEACHER2026
-                </span>
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Security & System Info Footer */}

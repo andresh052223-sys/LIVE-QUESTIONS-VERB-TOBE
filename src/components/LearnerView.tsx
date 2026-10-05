@@ -31,8 +31,8 @@ interface LearnerViewProps {
     rank: number;
     streak: number;
   } | null;
-  onJoinSession: (pin: string, name: string, ficha?: string, participantId?: string) => void;
-  onSubmitAnswer: (selectedIndex: number) => void;
+  onJoinSession: (pin: string, name: string, ficha?: string, participantId?: string) => Promise<void> | void;
+  onSubmitAnswer: (selectedIndex: number) => Promise<void> | void;
   onLogout: () => void;
   errorMessage: string | null;
 }

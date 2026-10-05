@@ -23,244 +23,376 @@ interface UseGameSocketReturn {
   } | null;
   finalSummary: FinalGameSummary | null;
   errorMessage: string | null;
-  createSession: (settings: GameSettings) => void;
-  reconnectInstructor: (pin: string) => void;
-  joinSession: (pin: string, name: string, ficha?: string, participantId?: string) => void;
-  addDemoLearners: () => void;
-  startGame: () => void;
-  submitAnswer: (selectedIndex: number) => void;
-  pauseResume: () => void;
-  revealAnswer: () => void;
-  showLeaderboard: () => void;
-  nextQuestion: () => void;
-  endGame: () => void;
+  createSession: (settings: GameSettings) => Promise<void>;
+  reconnectInstructor: (pin: string) => Promise<void>;
+  joinSession: (pin: string, name: string, ficha?: string, participantId?: string) => Promise<void>;
+  addDemoLearners: () => Promise<void>;
+  startGame: () => Promise<void>;
+  submitAnswer: (selectedIndex: number) => Promise<void>;
+  pauseResume: () => Promise<void>;
+  revealAnswer: () => Promise<void>;
+  showLeaderboard: () => Promise<void>;
+  nextQuestion: () => Promise<void>;
+  endGame: () => Promise<void>;
   clearError: () => void;
 }
 
 export function useGameSocket(): UseGameSocketReturn {
-  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isConnected, setIsConnected] = useState<boolean>(true);
   const [sessionState, setSessionState] = useState<PublicSessionState | null>(null);
   const [detailedParticipants, setDetailedParticipants] = useState<Participant[]>([]);
   const [personalInfo, setPersonalInfo] = useState<UseGameSocketReturn['personalInfo']>(null);
   const [finalSummary, setFinalSummary] = useState<FinalGameSummary | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const lastStateStatusRef = useRef<string | null>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const send = useCallback((payload: object) => {
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify(payload));
+  // Helper to apply incoming session state and handle audio cues
+  const applyStateUpdate = useCallback((
+    newState: PublicSessionState, 
+    detailedParts?: Participant[], 
+    personal?: UseGameSocketReturn['personalInfo'],
+    summary?: FinalGameSummary | null
+  ) => {
+    // Audio cue transitions
+    if (lastStateStatusRef.current !== newState.status) {
+      if (newState.status === 'question_active') {
+        sounds.playTick();
+      } else if (newState.status === 'question_ended') {
+        if (personal) {
+          if (personal.lastPointsEarned > 0) {
+            sounds.playCorrect();
+          } else {
+            sounds.playIncorrect();
+          }
+        }
+      } else if (newState.status === 'finished') {
+        sounds.playFanfare();
+      }
+      lastStateStatusRef.current = newState.status;
+    }
+
+    // Countdown tick for last 3 seconds
+    if (newState.status === 'question_active' && newState.timeRemaining <= 3 && newState.timeRemaining > 0) {
+      sounds.playTick();
+    }
+
+    setSessionState(newState);
+    if (detailedParts) {
+      setDetailedParticipants(detailedParts);
+    }
+    if (personal) {
+      setPersonalInfo(prev => ({
+        ...prev,
+        ...personal
+      }));
+    }
+    if (summary) {
+      setFinalSummary(summary);
     }
   }, []);
 
-  const connect = useCallback(() => {
-    if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
+  // Set up real-time stream (SSE) whenever a PIN is active
+  useEffect(() => {
+    const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
+    if (!pin) {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
       return;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
-    const ws = new WebSocket(wsUrl);
+    const role = localStorage.getItem('to_be_role') || 'learner';
+    const participantId = personalInfo?.id || localStorage.getItem('to_be_participant_id') || '';
 
-    ws.onopen = () => {
+    // 1. Establish SSE Connection
+    const sseUrl = `/api/session/${pin}/events?role=${role}&participantId=${encodeURIComponent(participantId)}`;
+    const es = new EventSource(sseUrl);
+
+    es.onopen = () => {
       setIsConnected(true);
       setErrorMessage(null);
-
-      // Check if we need to restore instructor or learner session
-      const savedPin = localStorage.getItem('to_be_active_pin');
-      const savedRole = localStorage.getItem('to_be_role');
-      const savedPartId = localStorage.getItem('to_be_participant_id');
-      const savedLearnerName = localStorage.getItem('to_be_learner_name');
-      const savedLearnerFicha = localStorage.getItem('to_be_learner_ficha') || undefined;
-
-      if (savedPin) {
-        if (savedRole === 'instructor') {
-          ws.send(JSON.stringify({ action: 'RECONNECT_INSTRUCTOR', pin: savedPin }));
-        } else if (savedRole === 'learner' && savedLearnerName) {
-          ws.send(JSON.stringify({
-            action: 'JOIN_SESSION',
-            pin: savedPin,
-            name: savedLearnerName,
-            ficha: savedLearnerFicha,
-            participantId: savedPartId || undefined
-          }));
-        }
-      }
     };
 
-    ws.onmessage = (event) => {
+    es.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        const { action } = data;
-
-        switch (action) {
-          case 'SESSION_CREATED': {
-            setSessionState(data.state);
-            setDetailedParticipants(data.detailedParticipants || []);
-            localStorage.setItem('to_be_active_pin', data.pin);
-            break;
-          }
-
-          case 'SESSION_RECONNECTED': {
-            setSessionState(data.state);
-            setDetailedParticipants(data.detailedParticipants || []);
-            break;
-          }
-
-          case 'JOIN_SUCCESS': {
-            setSessionState(data.state);
-            setPersonalInfo(data.personal);
-            localStorage.setItem('to_be_active_pin', data.pin);
-            if (data.participantId) {
-              localStorage.setItem('to_be_participant_id', data.participantId);
-            }
-            break;
-          }
-
-          case 'JOIN_ERROR': {
-            setErrorMessage(data.message || 'Error joining game session.');
-            break;
-          }
-
-          case 'SESSION_STATE_UPDATE': {
-            const newState: PublicSessionState = data.state;
-            
-            // Audio cue triggers when status changes
-            if (lastStateStatusRef.current !== newState.status) {
-              if (newState.status === 'question_active') {
-                sounds.playTick();
-              } else if (newState.status === 'question_ended') {
-                if (data.personal) {
-                  if (data.personal.lastPointsEarned > 0) {
-                    sounds.playCorrect();
-                  } else {
-                    sounds.playIncorrect();
-                  }
-                }
-              }
-              lastStateStatusRef.current = newState.status;
-            }
-
-            // Countdown tick on final 3 seconds
-            if (newState.status === 'question_active' && newState.timeRemaining <= 3 && newState.timeRemaining > 0) {
-              sounds.playTick();
-            }
-
-            setSessionState(newState);
-            if (data.detailedParticipants) {
-              setDetailedParticipants(data.detailedParticipants);
-            }
-            if (data.personal) {
-              setPersonalInfo(data.personal);
-            }
-            break;
-          }
-
-          case 'ANSWER_RECEIVED': {
-            setPersonalInfo(prev => prev ? {
-              ...prev,
-              hasAnswered: true,
-              selectedOption: data.selectedIndex
-            } : null);
-            break;
-          }
-
-          case 'GAME_FINISHED': {
-            setSessionState(data.state);
-            setFinalSummary(data.summary);
-            sounds.playFanfare();
-            break;
-          }
-
-          case 'ERROR': {
-            setErrorMessage(data.message);
-            break;
-          }
-
-          default:
-            break;
+        if (data.action === 'SESSION_STATE_UPDATE') {
+          applyStateUpdate(data.state, data.detailedParticipants, data.personal, data.summary);
         }
-      } catch (e) {
-        console.error('Failed to parse socket message:', e);
+      } catch (err) {
+        console.error('Error parsing SSE event:', err);
       }
     };
 
-    ws.onclose = () => {
+    es.onerror = () => {
+      // SSE connection temporarily lost, fallback polling will ensure sync
       setIsConnected(false);
-      socketRef.current = null;
-      // Exponential auto-reconnect
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = setTimeout(() => {
-        connect();
-      }, 2000);
     };
 
-    ws.onerror = (err) => {
-      console.warn('WebSocket error:', err);
+    eventSourceRef.current = es;
+
+    // 2. Fallback polling every 1200ms
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/session/${pin}?participantId=${encodeURIComponent(participantId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setIsConnected(true);
+          applyStateUpdate(data.state, data.detailedParticipants, data.personal, data.summary);
+        }
+      } catch {
+        // Polling network issue
+      }
     };
 
-    socketRef.current = ws;
+    pollingIntervalRef.current = setInterval(poll, 1200);
+
+    return () => {
+      es.close();
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, [sessionState?.pin, personalInfo?.id, applyStateUpdate]);
+
+  // Initial load check to restore session if available
+  useEffect(() => {
+    const savedPin = localStorage.getItem('to_be_active_pin');
+    const savedRole = localStorage.getItem('to_be_role');
+    const savedPartId = localStorage.getItem('to_be_participant_id');
+    const savedName = localStorage.getItem('to_be_learner_name');
+
+    if (savedPin && savedRole) {
+      fetch(`/api/session/${savedPin}?participantId=${savedPartId || ''}`)
+        .then(res => {
+          if (res.ok) return res.json();
+          throw new Error('Not found');
+        })
+        .then(data => {
+          applyStateUpdate(data.state, data.detailedParticipants, data.personal, data.summary);
+          if (data.personal) {
+            setPersonalInfo(data.personal);
+          } else if (savedPartId && savedName) {
+            setPersonalInfo({
+              id: savedPartId,
+              name: savedName,
+              score: 0,
+              lastPointsEarned: 0,
+              hasAnswered: false,
+              selectedOption: null,
+              rank: 1,
+              streak: 0
+            });
+          }
+        })
+        .catch(() => {
+          // Clean stale session
+          localStorage.removeItem('to_be_active_pin');
+        });
+    }
+  }, [applyStateUpdate]);
+
+  // Actions with direct, instant HTTP requests
+  const createSession = useCallback(async (settings: GameSettings) => {
+    try {
+      setErrorMessage(null);
+      const res = await fetch('/api/session/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings })
+      });
+      if (!res.ok) throw new Error('Error al crear la sesión en el servidor');
+      const data = await res.json();
+      localStorage.setItem('to_be_active_pin', data.pin);
+      setSessionState(data.state);
+      setDetailedParticipants(data.detailedParticipants || []);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error desconocido al crear sesión';
+      setErrorMessage(msg);
+    }
   }, []);
 
-  useEffect(() => {
-    connect();
-    return () => {
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (socketRef.current) {
-        socketRef.current.close();
+  const reconnectInstructor = useCallback(async (pin: string) => {
+    try {
+      const res = await fetch(`/api/session/${pin}`);
+      if (!res.ok) throw new Error('Sesión no encontrada');
+      const data = await res.json();
+      localStorage.setItem('to_be_active_pin', pin);
+      applyStateUpdate(data.state, data.detailedParticipants, undefined, data.summary);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'No se pudo reconectar';
+      setErrorMessage(msg);
+    }
+  }, [applyStateUpdate]);
+
+  const joinSession = useCallback(async (pin: string, name: string, ficha?: string, participantId?: string) => {
+    try {
+      setErrorMessage(null);
+      const res = await fetch('/api/session/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin, name, ficha, participantId })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'PIN no encontrado o sesión inválida');
       }
-    };
-  }, [connect]);
+      const data = await res.json();
+      localStorage.setItem('to_be_active_pin', data.pin);
+      if (data.participantId) {
+        localStorage.setItem('to_be_participant_id', data.participantId);
+      }
+      setSessionState(data.state);
+      setPersonalInfo(data.personal);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al unirse a la sala';
+      setErrorMessage(msg);
+    }
+  }, []);
 
-  // Public Actions
-  const createSession = useCallback((settings: GameSettings) => {
-    send({ action: 'CREATE_SESSION', settings });
-  }, [send]);
+  const addDemoLearners = useCallback(async () => {
+    const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
+    if (!pin) return;
+    try {
+      const res = await fetch('/api/session/demo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSessionState(data.state);
+        setDetailedParticipants(data.detailedParticipants || []);
+      }
+    } catch (err) {
+      console.error('Error adding demo learners:', err);
+    }
+  }, [sessionState?.pin]);
 
-  const reconnectInstructor = useCallback((pin: string) => {
-    send({ action: 'RECONNECT_INSTRUCTOR', pin });
-  }, [send]);
+  const startGame = useCallback(async () => {
+    const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
+    if (!pin) return;
+    try {
+      const res = await fetch('/api/session/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSessionState(data.state);
+      }
+    } catch (err) {
+      console.error('Error starting game:', err);
+    }
+  }, [sessionState?.pin]);
 
-  const joinSession = useCallback((pin: string, name: string, ficha?: string, participantId?: string) => {
-    send({ action: 'JOIN_SESSION', pin, name, ficha, participantId });
-  }, [send]);
-
-  const addDemoLearners = useCallback(() => {
-    send({ action: 'ADD_DEMO_LEARNERS' });
-  }, [send]);
-
-  const startGame = useCallback(() => {
-    send({ action: 'START_GAME' });
-  }, [send]);
-
-  const submitAnswer = useCallback((selectedIndex: number) => {
+  const submitAnswer = useCallback(async (selectedIndex: number) => {
     sounds.playSelect();
-    const pin = sessionState?.pin;
-    const participantId = personalInfo?.id;
-    send({ action: 'SUBMIT_ANSWER', pin, participantId, selectedIndex });
-  }, [send, sessionState?.pin, personalInfo?.id]);
+    const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
+    const participantId = personalInfo?.id || localStorage.getItem('to_be_participant_id');
+    if (!pin || !participantId) return;
 
-  const pauseResume = useCallback(() => {
-    send({ action: 'PAUSE_RESUME' });
-  }, [send]);
+    // Optimistic UI update immediately
+    setPersonalInfo(prev => prev ? {
+      ...prev,
+      hasAnswered: true,
+      selectedOption: selectedIndex
+    } : null);
 
-  const revealAnswer = useCallback(() => {
-    send({ action: 'REVEAL_ANSWER' });
-  }, [send]);
+    try {
+      await fetch('/api/session/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin, participantId, selectedIndex })
+      });
+    } catch (err) {
+      console.error('Error submitting answer:', err);
+    }
+  }, [sessionState?.pin, personalInfo?.id]);
 
-  const showLeaderboard = useCallback(() => {
-    send({ action: 'SHOW_LEADERBOARD' });
-  }, [send]);
+  const pauseResume = useCallback(async () => {
+    const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
+    if (!pin) return;
+    try {
+      await fetch('/api/session/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
+    } catch (err) {
+      console.error('Error toggling pause:', err);
+    }
+  }, [sessionState?.pin]);
 
-  const nextQuestion = useCallback(() => {
-    send({ action: 'NEXT_QUESTION' });
-  }, [send]);
+  const revealAnswer = useCallback(async () => {
+    const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
+    if (!pin) return;
+    try {
+      await fetch('/api/session/reveal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
+    } catch (err) {
+      console.error('Error revealing answer:', err);
+    }
+  }, [sessionState?.pin]);
 
-  const endGame = useCallback(() => {
-    send({ action: 'END_GAME' });
-  }, [send]);
+  const showLeaderboard = useCallback(async () => {
+    const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
+    if (!pin) return;
+    try {
+      await fetch('/api/session/leaderboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
+    } catch (err) {
+      console.error('Error showing leaderboard:', err);
+    }
+  }, [sessionState?.pin]);
+
+  const nextQuestion = useCallback(async () => {
+    const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
+    if (!pin) return;
+    try {
+      await fetch('/api/session/next', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
+    } catch (err) {
+      console.error('Error moving to next question:', err);
+    }
+  }, [sessionState?.pin]);
+
+  const endGame = useCallback(async () => {
+    const pin = sessionState?.pin || localStorage.getItem('to_be_active_pin');
+    if (!pin) return;
+    try {
+      const res = await fetch('/api/session/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFinalSummary(data.summary);
+      }
+    } catch (err) {
+      console.error('Error ending game:', err);
+    }
+  }, [sessionState?.pin]);
 
   const clearError = useCallback(() => {
     setErrorMessage(null);

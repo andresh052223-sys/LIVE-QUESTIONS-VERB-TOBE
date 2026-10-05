@@ -37,14 +37,14 @@ interface InstructorDashboardProps {
   sessionState: PublicSessionState | null;
   detailedParticipants: Participant[];
   finalSummary: FinalGameSummary | null;
-  onCreateSession: (settings: GameSettings) => void;
-  onAddDemoLearners: () => void;
-  onStartGame: () => void;
-  onPauseResume: () => void;
-  onRevealAnswer: () => void;
-  onShowLeaderboard: () => void;
-  onNextQuestion: () => void;
-  onEndGame: () => void;
+  onCreateSession: (settings: GameSettings) => Promise<void> | void;
+  onAddDemoLearners: () => Promise<void> | void;
+  onStartGame: () => Promise<void> | void;
+  onPauseResume: () => Promise<void> | void;
+  onRevealAnswer: () => Promise<void> | void;
+  onShowLeaderboard: () => Promise<void> | void;
+  onNextQuestion: () => Promise<void> | void;
+  onEndGame: () => Promise<void> | void;
   onLogout: () => void;
 }
 
@@ -77,6 +77,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   const [copiedPin, setCopiedPin] = useState(false);
   const [isMuted, setIsMuted] = useState(sounds.getMuted());
   const [activeTab, setActiveTab] = useState<'live' | 'participants'>('live');
+  const [isCreating, setIsCreating] = useState(false);
 
   // Trigger confetti when game finishes
   useEffect(() => {
@@ -106,14 +107,19 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     }
   };
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onCreateSession({
-      timerSeconds,
-      totalQuestions,
-      categoryFilter,
-      questionMode
-    });
+    setIsCreating(true);
+    try {
+      await onCreateSession({
+        timerSeconds,
+        totalQuestions,
+        categoryFilter,
+        questionMode
+      });
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   // If no session created yet
@@ -243,9 +249,17 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-4 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-extrabold text-base shadow-xl shadow-indigo-600/30 cursor-pointer transition-all active:scale-[0.99]"
+                disabled={isCreating}
+                className="w-full py-4 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-extrabold text-base shadow-xl shadow-indigo-600/30 cursor-pointer transition-all active:scale-[0.99] flex items-center justify-center gap-2"
               >
-                CREATE SESSION
+                {isCreating ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>GENERANDO GAME PIN...</span>
+                  </>
+                ) : (
+                  <span>CREATE SESSION</span>
+                )}
               </button>
             </form>
 
